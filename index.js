@@ -1,12 +1,6 @@
 const runFrontend = async (x) => {
   globalThis.x = x
 
-  if (!Array.prototype.at) {
-    Array.prototype.at = function (i) {
-      return i < 0 ? this[this.length + i] : this[i]
-    }
-  }
-
   x.s('docMkElement', (x) => {
     const { id, tag, txt, html, events, css, attributes } = x
 
@@ -457,7 +451,7 @@ const runBackend = async (x) => {
 }
 
 ;(async () => {
-  
+
   const X = () => {
     const x = {
       IF_NO_SUB_IGNORE: Symbol('ignore-if-no-sub'),
