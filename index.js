@@ -1,6 +1,5 @@
 const runFrontend = async (x) => {
-  globalThis.x = x
-
+  
   x.s('docMkElement', (x) => {
     const { id, tag, txt, html, events, css, attributes } = x
 
@@ -228,11 +227,9 @@ const runBackend = async (x) => {
     const statePath = `state/${repo}`
 
     if (x.set) {
-      const { isBin, id, v } = x.set
+      const { id, v } = x.set
       const path = `${statePath}/${id}`
-      const format = typeof v === 'string' ? null : 'json'
-
-      return await x.p('fs', { set: { path, v, format } })
+      return await x.p('fs', { set: { path, v } })
     }
     if (x.get) {
       const { id } = x.get
@@ -386,7 +383,7 @@ const runBackend = async (x) => {
   })
 
   await x.s('httpHandler', async (x) => {
-    const { b, runtimeCtx, rq, fs } = x
+    const { rq, fs } = x
     const ctx = {
       rq,
       headers: rq.headers,

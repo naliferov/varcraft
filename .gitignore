@@ -1,2 +1,5 @@
 .vscode
 node_modules
+state/projects/*
+!state/projects/std
+state/users/*
