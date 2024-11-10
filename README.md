@@ -1,2 +1,2 @@
-# varcraft
+# ocraft
 Javascript sandbox

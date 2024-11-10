@@ -18,7 +18,7 @@ const runFrontend = async (x) => {
     return o
   })
 
-  x.s('blockObserver', async (x) => {
+  x.s('oFactory', async (x) => {
     const state = x.state
     const isObj = (o) => typeof o === 'object' && o !== null
     const updateCallback = () => x.p('setBlock', { id: state.id })
@@ -77,17 +77,17 @@ const runFrontend = async (x) => {
   })
   x.s('getDomById', async (x) => document.getElementById(x.id))
 
-  const blocks = {}
+  const objects = {}
 
-  x.s('getBlock', (x) => blocks[x.id])
+  x.s('getBlock', (x) => objects[x.id])
   x.s('setBlock', async (x) => {
     const id = x.id
-    const block = blocks[id]
-    if (!block) return
+    const object = objects[id]
+    if (!object) return
 
-    await x.p('set', { id, data: JSON.stringify(block) })
+    await x.p('set', { id, data: JSON.stringify(object) })
   })
-  x.s('renderBlocks', async (x) => {
+  x.s('renderObjects', async (x) => {
     const insertTxtAtCursor = (text) => {
       const selection = window.getSelection()
       if (!selection.rangeCount) return
@@ -104,12 +104,13 @@ const runFrontend = async (x) => {
       selection.addRange(range)
     }
 
-    //better use array from backend
-    for (const id in x.blocks) {
-      const block = await x.p('blockObserver', {
-        state: JSON.parse(x.blocks[id]),
-      })
-      blocks[id] = block
+    const data = x.objects
+    for (let i = 0; i < data.length; i++) {
+      const oData = JSON.parse(data[i])
+      const id = oData.id
+
+      objects[id] = await x.p('oFactory', { state: oData })
+      const object = objects[id]
 
       const dom = await x.p('docMkElement', {
         attributes: { id },
@@ -117,10 +118,10 @@ const runFrontend = async (x) => {
       })
       x.app.append(dom)
 
-      const pre = await x.p('docMkElement', { tag: 'pre', class: 'block-code' })
+      const pre = await x.p('docMkElement', { tag: 'pre', class: 'object-code' })
       pre.setAttribute('contenteditable', 'plaintext-only')
-      pre.setAttribute('block-id', id)
-      pre.innerText = block.code
+      pre.setAttribute('object-id', id)
+      pre.innerText = object.code
       pre.addEventListener('keydown', (e) => {
         if (e.key === 'Tab') {
           e.preventDefault()
@@ -131,7 +132,7 @@ const runFrontend = async (x) => {
 
       const code = `
         export default async ($) => {
-          ${block.code}
+          ${object.code}
         }
       `
       const url = URL.createObjectURL(
@@ -139,7 +140,7 @@ const runFrontend = async (x) => {
       )
       try {
         const m = await import(url)
-        m.default({ x, state: block, dom, id, sysId: id, domId: id })
+        m.default({ x, state: object, dom, id, sysId: id, domId: id })
       } catch (e) {
         console.error(e)
       }
@@ -149,20 +150,20 @@ const runFrontend = async (x) => {
   await x.s('subToCodeInput', (x) => {
     document.addEventListener('input', async (e) => {
       const t = e.target
-      if (!t.classList || !t.classList.contains('block-code')) return
-      const id = t.getAttribute('block-id')
+      if (!t.classList || !t.classList.contains('object-code')) return
+      const id = t.getAttribute('object-id')
       if (!id) return
 
-      const block = await x.p('getBlock', { id })
-      block.code = t.innerText
+      const object = await x.p('getBlock', { id })
+      object.code = t.innerText
     })
   })
 
   const app = await x.p('docMkElement', { id: 'app' })
   document.body.append(app)
 
-  const stdBlocks = await x.p('get', { project: 'std', getAll: {} })
-  await x.p('renderBlocks', { app, blocks: stdBlocks })
+  const stdObjects = await x.p('get', { project: 'std', getAll: {} })
+  await x.p('renderObjects', { app, objects: stdObjects })
   await x.p('subToCodeInput')
 
   document.fonts.ready.then(() => {
