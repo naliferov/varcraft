@@ -1,5 +1,5 @@
 const runFrontend = async (x) => {
-  
+
   x.s('docMkElement', (x) => {
     const { id, tag, txt, html, events, css, attributes } = x
 
@@ -18,28 +18,13 @@ const runFrontend = async (x) => {
     return o
   })
 
-  x.s('getUUID', () => {
-    if (!window.crypto?.randomUUID) {
-      const replaceFunc = (c) => {
-        const uuid = (Math.random() * 16) | 0,
-          v = c == 'x' ? uuid : (uuid & 0x3) | 0x8
-        return uuid.toString(16)
-      }
-      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(
-        /[xy]/g,
-        replaceFunc
-      )
-    }
-    return crypto.randomUUID()
-  })
-
   x.s('blockObserver', async (x) => {
-    const state = x.state || {}
-    const cb = (update) => x.p('setBlock', { id: state.id })
+    const state = x.state
     const isObj = (o) => typeof o === 'object' && o !== null
+    const updateCallback = () => x.p('setBlock', { id: state.id })
 
     const makeObjectObservable = (obj) => {
-      for (let key in obj) {
+      for (const key in obj) {
         if (isObj(obj[key])) {
           obj[key] = makeObjectObservable(obj[key])
         }
@@ -47,8 +32,6 @@ const runFrontend = async (x) => {
 
       return new Proxy(obj, {
         set: (target, property, value) => {
-          const oldValue = target[property]
-
           if (isObj(value)) {
             value = makeObjectObservable(value)
           }
@@ -57,24 +40,12 @@ const runFrontend = async (x) => {
           }
 
           target[property] = value
-          cb({
-            type: 'update',
-            target,
-            property,
-            oldValue,
-            newValue: value,
-          })
+          updateCallback()
           return true
         },
         deleteProperty: (target, property) => {
-          const oldValue = target[property]
           delete target[property]
-          cb({
-            type: 'delete',
-            target,
-            property,
-            oldValue,
-          })
+          updateCallback()
           return true
         },
       })
@@ -114,7 +85,7 @@ const runFrontend = async (x) => {
     const block = blocks[id]
     if (!block) return
 
-    await x.p('set', { namespace: 'std', id, v: JSON.stringify(block) })
+    await x.p('set', { id, data: JSON.stringify(block) })
   })
   x.s('renderBlocks', async (x) => {
     const insertTxtAtCursor = (text) => {
@@ -133,7 +104,8 @@ const runFrontend = async (x) => {
       selection.addRange(range)
     }
 
-    for (let id in x.blocks) {
+    //better use array from backend
+    for (const id in x.blocks) {
       const block = await x.p('blockObserver', {
         state: JSON.parse(x.blocks[id]),
       })
@@ -150,8 +122,8 @@ const runFrontend = async (x) => {
       pre.setAttribute('block-id', id)
       pre.innerText = block.code
       pre.addEventListener('keydown', (e) => {
-        if (event.key === 'Tab') {
-          event.preventDefault()
+        if (e.key === 'Tab') {
+          e.preventDefault()
           insertTxtAtCursor('    ')
         }
       })
@@ -167,7 +139,7 @@ const runFrontend = async (x) => {
       )
       try {
         const m = await import(url)
-        await m.default({ x, sysId: id, domId: id })
+        m.default({ x, state: block, dom, id, sysId: id, domId: id })
       } catch (e) {
         console.error(e)
       }
@@ -189,11 +161,7 @@ const runFrontend = async (x) => {
   const app = await x.p('docMkElement', { id: 'app' })
   document.body.append(app)
 
-  const { IndexedDb } = await import('/module/IndexedDb.js')
-  const idb = new IndexedDb()
-  await idb.open()
-
-  const stdBlocks = await x.p('get', { getAll: {} })
+  const stdBlocks = await x.p('get', { project: 'std', getAll: {} })
   await x.p('renderBlocks', { app, blocks: stdBlocks })
   await x.p('subToCodeInput')
 
@@ -211,53 +179,52 @@ const runFrontend = async (x) => {
 
 const runBackend = async (x) => {
   x.s('set', async (x) => {
-    const { id, v } = x
-    if (id && v) {
-      await x.p('repo', { set: { id, v }, repo: 'std' })
-      return { id, v }
-    }
+    const { auth, project, id, data } = x
+    const path = `project/std/${id}`
+
+    await x.p('state', { path, set: { data } })
+    return { id, data }
   })
   x.s('get', async (x) => {
-    let { id, auth, project, getAll } = x
-    if (id) return await x.p('repo', { get: { id }, repo: 'std' })
-    if (getAll) return await x.p('repo', { getAll, repo: 'std' })
+    let { auth, project, getAll } = x
+    const path = 'project/' + project
+
+    if (getAll) return await x.p('state', { auth, path, getAll })
   })
-  x.s('repo', async (x) => {
-    const repo = x.repo
-    const statePath = `state/${repo}`
+  x.s('state', async (x) => {
+    const { path } = x
+    const statePath = `state/${path}`
 
     if (x.set) {
-      const { id, v } = x.set
-      const path = `${statePath}/${id}`
-      return await x.p('fs', { set: { path, v } })
+      return await x.p('fs', { set: { path: statePath, data: x.set.data } })
     }
-    if (x.get) {
-      const { id } = x.get
-      const path = `${statePath}/${id}`
-      const block = await x.p('fs', { get: { path } })
-      if (block) return block.toString()
-    }
+    //if (x.get) {
+      //const { id } = x.get
+      //const path = `${statePath}/${id}`
+      //const block = await x.p('fs', { get: { path } })
+      //if (block) return block.toString() //in case id.bin don't make toString
+    //}
     if (x.getAll) {
       const list = await x.p('fs', { readdir: { path: statePath } })
-      const r = {}
+      const r = []
       for (let i of list) {
-        r[i] = await x.p('fs', {
+        const str = await x.p('fs', {
           get: { path: `${statePath}/${i}` },
         })
-        r[i] = r[i].toString()
+        r.push(str.toString())
       }
       return r
     }
     if (x.del) {
-      const { id } = x.del
-      const path = `${statePath}/${id}`
-      return x.p('fs', { del: { path } })
+      //const { id } = x.del
+      //const path = `${statePath}/${id}`
+      //return x.p('fs', { del: { path } })
     }
   })
   x.s('fs', async (x) => {
     const { promises: fs } = await import('node:fs')
     try {
-      if (x.set) return await fs.writeFile(x.set.path, x.set.v)
+      if (x.set) return await fs.writeFile(x.set.path, x.set.data)
       if (x.get) return await fs.readFile(x.get.path)
       if (x.del) return await fs.unlink(x.del.path)
       if (x.readdir) return await fs.readdir(x.readdir.path)
@@ -274,11 +241,12 @@ const runBackend = async (x) => {
     //check user by user name
   })
   x.s('httpGetFile', async (x) => {
-    let ext, mime
     const { ctx } = x
     const pathname = ctx.url.pathname
+    if (pathname === '/favicon.ico') return { fileNotFound: true }
     //todo block rq to state dir
 
+    let ext, mime
     const split = pathname.split('/').pop().split('.')
     if (split.length < 2) return {}
     ext = split.at(-1)
@@ -393,10 +361,8 @@ const runBackend = async (x) => {
     ctx.url.searchParams.forEach((v, k) => (ctx.query[k] = v))
     const r = await x.p('httpGetFile', { ctx, fs })
 
-    if (r.file)
-      return await x.p('httpMkResp', { v: r.file, mime: r.mime, isBin: true })
-    if (r.fileNotFound)
-      return await x.p('httpMkResp', { code: 404, v: 'File not found' })
+    if (r.file) return await x.p('httpMkResp', { v: r.file, mime: r.mime, isBin: true })
+    if (r.fileNotFound) return await x.p('httpMkResp', { code: 404, v: 'File not found' })
 
     let msg = await x.p('httpGetBody', { ctx })
     if (!msg) msg = {}
@@ -423,6 +389,7 @@ const runBackend = async (x) => {
       requestTimeout: 30000,
     })
     const ctx = { filename: process.argv[1].split('/').at(-1) }
+    const port = process.env.PORT || 3000
 
     server.on('request', async (rq, rs) => {
       rq.on('error', (e) => {
@@ -440,8 +407,8 @@ const runBackend = async (x) => {
         }).end(m)
       }
     })
-    server.listen(process.env.PORT, () =>
-      console.log(`server start on port: [${process.env.PORT}]`)
+    server.listen(port, () =>
+      console.log(`server start on port: [${port}]`)
     )
   })
   await x.p('startServer')
@@ -451,8 +418,6 @@ const runBackend = async (x) => {
 
   const X = () => {
     const x = {
-      IF_NO_SUB_IGNORE: Symbol('ignore-if-no-sub'),
-
       events: {},
       func: {},
 
@@ -461,30 +426,33 @@ const runBackend = async (x) => {
 
         const func = this.func[event]
         if (!func) {
-          if (data[this.IF_NO_SUB_IGNORE]) return
+          const events = this.events
+          if (!events[event]) events[event] = []
 
-          if (!this.events[event]) this.events[event] = []
-          this.events[event].push(data)
+          const { promise, resolve } = Promise.withResolvers()
+          events[event].push({ data, resolve })
 
-          console.log(`send event to future [${event}]`)
-          return
+          console.log(`[${event}] > future`)
+          return promise
         }
 
-        if (typeof func !== 'function') {
-          console.log(event, func)
-        }
-
+        if (typeof func !== 'function') console.log(event, func)
         return func(dataObj)
       },
       async s(event, func) {
         this.func[event] = func
 
+        if (event.at(0) === '@') {
+          console.log('closure event', event) 
+        }
+
         const events = this.events[event]
         if (!events) return this
 
-        console.log(`receive event from past [${event}]`)
-        for (let eventData of events) {
-          this.p(event, eventData)
+        console.log(`past > [${event}]`)
+        for (const { data, resolve } of events) {
+          const response = await this.p(event, data)
+          resolve(response)
         }
         delete this.events[event]
         return this
@@ -495,11 +463,13 @@ const runBackend = async (x) => {
       new Proxy(() => {}, {
         get(t, prop) {
           if (prop === 'p') return (...args) => x.p(...args)
-          if (prop === 's')
+          if (prop === 's') {
             return (...args) => {
               x.s(...args)
               return x
             }
+          }
+          //if (prop === '⚫') return data
           if (prop === 'toJSON') return () => data
 
           return data[prop]
