@@ -21,7 +21,7 @@ const runFrontend = async (x) => {
   x.s('oFactory', async (x) => {
     const state = x.state
     const isObj = (o) => typeof o === 'object' && o !== null
-    const updateCallback = () => x.p('setBlock', { id: state.id })
+    const updateCallback = () => x.p('saveObject', { id: state.id })
 
     const makeObjectObservable = (obj) => {
       for (const key in obj) {
@@ -79,34 +79,57 @@ const runFrontend = async (x) => {
 
   const objects = {}
 
-  x.s('getBlock', (x) => objects[x.id])
-  x.s('setBlock', async (x) => {
+  x.s('getObject', (x) => objects[x.id])
+  x.s('setObject', async (x) => objects[x.o.id] = x.o)
+  x.s('saveObject', async (x) => {
     const id = x.id
     const object = objects[id]
     if (!object) return
 
     await x.p('set', { id, data: JSON.stringify(object) })
   })
-  x.s('renderObjects', async (x) => {
-    const insertTxtAtCursor = (text) => {
-      const selection = window.getSelection()
-      if (!selection.rangeCount) return
 
-      const range = selection.getRangeAt(0)
-      range.deleteContents()
-
-      const textNode = document.createTextNode(text)
-      range.insertNode(textNode)
-
-      range.setStartAfter(textNode)
-      range.setEndAfter(textNode)
-      selection.removeAllRanges()
-      selection.addRange(range)
+  const remove4CharsBeforeCursor = () => {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return;
+  
+    const range = selection.getRangeAt(0);
+    const startOffset = range.startOffset;
+  
+    if (startOffset >= 4) {
+      const currentNode = range.startContainer;
+      const cursorPosition = startOffset - 4;
+  
+      range.setStart(range.startContainer, cursorPosition);
+      range.deleteContents();
+      range.setStart(currentNode, cursorPosition)
+      range.collapse(true)
+  
+      selection.removeAllRanges();
+      //selection.addRange(range);
     }
+  }
 
-    const data = x.objects
-    for (let i = 0; i < data.length; i++) {
-      const oData = JSON.parse(data[i])
+  const insertTxtAtCursor = (text) => {
+    const selection = window.getSelection()
+    if (!selection.rangeCount) return
+
+    const range = selection.getRangeAt(0)
+    range.deleteContents()
+
+    const textNode = document.createTextNode(text)
+    range.insertNode(textNode)
+
+    range.setStartAfter(textNode)
+    range.setEndAfter(textNode)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
+  x.s('renderObject', async (x) => {
+    const { target, object: objectData, updateOnInput } = x
+    
+      const oData = JSON.parse(objectData)
       const id = oData.id
 
       objects[id] = await x.p('oFactory', { state: oData })
@@ -116,66 +139,42 @@ const runFrontend = async (x) => {
         attributes: { id },
         class: 'block',
       })
-      x.app.append(dom)
+      target.append(dom)
 
       const pre = await x.p('docMkElement', { tag: 'pre', class: 'object-code' })
       pre.setAttribute('contenteditable', 'plaintext-only')
       pre.setAttribute('object-id', id)
       pre.innerText = object.code
       pre.addEventListener('keydown', (e) => {
-        if (e.key === 'Tab') {
-          e.preventDefault()
-          insertTxtAtCursor('    ')
+        if (e.key !== 'Tab') return
+        e.preventDefault()
+        if (e.shiftKey) {
+          remove4CharsBeforeCursor()
+          return
         }
+        insertTxtAtCursor('    ')
       })
+      if (updateOnInput) {
+        pre.addEventListener('input', () => object.code = pre.innerText)
+      }
       dom.append(pre)
 
-      const code = `
-        export default async ($) => {
-          ${object.code}
-        }
-      `
-      const url = URL.createObjectURL(
-        new Blob([code], { type: 'application/javascript' })
-      )
+      const code = `export default async ($) => { ${object.code} }`
+      const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }))
       try {
         const m = await import(url)
-        m.default({ x, state: object, dom, id, sysId: id, domId: id })
+        m.default({ x, o: object, dom, id, sysId: id, domId: id })
       } catch (e) {
         console.error(e)
       }
-    }
-  })
-
-  await x.s('subToCodeInput', (x) => {
-    document.addEventListener('input', async (e) => {
-      const t = e.target
-      if (!t.classList || !t.classList.contains('object-code')) return
-      const id = t.getAttribute('object-id')
-      if (!id) return
-
-      const object = await x.p('getBlock', { id })
-      object.code = t.innerText
-    })
   })
 
   const app = await x.p('docMkElement', { id: 'app' })
   document.body.append(app)
 
-  const stdObjects = await x.p('get', { project: 'std', getAll: {} })
-  await x.p('renderObjects', { app, objects: stdObjects })
-  await x.p('subToCodeInput')
-
-  document.fonts.ready.then(() => {
-    const scroll = localStorage.getItem('scroll')
-    if (!scroll) return
-    const { x, y } = JSON.parse(scroll)
-    window.scrollTo(x, y)
-  })
-  window.addEventListener('scroll', () => {
-    const s = { x: window.scrollX, y: window.scrollY }
-    localStorage.setItem('scroll', JSON.stringify(s))
-  })
+  const mainObject = await x.p('get', { project: 'std', get: { id: 'main' } })
+  await x.p('renderObject', { target: app, object: mainObject.object, updateOnInput: true })
+  return
 }
 
 const runBackend = async (x) => {
@@ -187,24 +186,23 @@ const runBackend = async (x) => {
     return { id, data }
   })
   x.s('get', async (x) => {
-    let { auth, project, getAll } = x
+    let { auth, project, get, getAll } = x
     const path = 'project/' + project
 
     if (getAll) return await x.p('state', { auth, path, getAll })
+    if (get) return await x.p('state', { auth, path, get })
   })
   x.s('state', async (x) => {
     const { path } = x
     const statePath = `state/${path}`
 
-    if (x.set) {
-      return await x.p('fs', { set: { path: statePath, data: x.set.data } })
+    if (x.set) return await x.p('fs', { set: { path: statePath, data: x.set.data } })
+    if (x.get) {
+      const { id } = x.get
+      const path = `${statePath}/${id}`
+      const object = await x.p('fs', { get: { path } })
+      if (object) return { object : object.toString() } //in case id.bin don't make toString
     }
-    //if (x.get) {
-      //const { id } = x.get
-      //const path = `${statePath}/${id}`
-      //const block = await x.p('fs', { get: { path } })
-      //if (block) return block.toString() //in case id.bin don't make toString
-    //}
     if (x.getAll) {
       const list = await x.p('fs', { readdir: { path: statePath } })
       const r = []
@@ -470,7 +468,6 @@ const runBackend = async (x) => {
               return x
             }
           }
-          //if (prop === '⚫') return data
           if (prop === 'toJSON') return () => data
 
           return data[prop]

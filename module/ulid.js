@@ -1,153 +1,166 @@
-const BASE32_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-const BASE32_LENGTH = BASE32_ALPHABET.length;
-const MAX_TIME = Math.pow(2, 48) - 1;
-const TIME_LENGTH = 10;
-const RANDOM_LENGTH = 16;
-
-class ULIDError extends Error {
-  constructor(message) {
-    super(message);
-    this.source = 'ulid';
-  }
+function createError(message) {
+  const err = new Error(message);
+  err.source = "ulid";
+  return err;
 }
 
+const ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford's Base32
+const ENCODING_LEN = ENCODING.length;
+const TIME_MAX = Math.pow(2, 48) - 1;
+const TIME_LEN = 10;
+const RANDOM_LEN = 16;
+
 function replaceCharAt(str, index, char) {
-  if (index > str.length - 1) return str;
+  if (index > str.length - 1) {
+    return str;
+  }
   return str.substr(0, index) + char + str.substr(index + 1);
 }
 
 function incrementBase32(str) {
-  let idx;
-  let length = str.length;
-  let i;
-  let newChar;
-  let maxChar = BASE32_LENGTH - 1;
-
-  while (!idx && length-- >= 0) {
-    i = str[length];
-    const charIndex = BASE32_ALPHABET.indexOf(i);
-    if (charIndex === -1) throw new ULIDError('incorrectly encoded string');
-    
-    if (charIndex !== maxChar) {
-      return replaceCharAt(str, length, BASE32_ALPHABET[charIndex + 1]);
-    } else {
-      str = replaceCharAt(str, length, BASE32_ALPHABET[0]);
+  let done;
+  let index = str.length;
+  let char;
+  let charIndex;
+  const maxCharIndex = ENCODING_LEN - 1;
+  while (!done && index-- >= 0) {
+    char = str[index];
+    charIndex = ENCODING.indexOf(char);
+    if (charIndex === -1) {
+      throw createError("incorrectly encoded string");
     }
-  }
-
-  throw new ULIDError('cannot increment this string');
-}
-
-function randomChar(random) {
-  let randIndex = Math.floor(random() * BASE32_LENGTH);
-  if (randIndex === BASE32_LENGTH) randIndex = BASE32_LENGTH - 1;
-  return BASE32_ALPHABET.charAt(randIndex);
-}
-
-function encodeTime(time, length) {
-  if (isNaN(time)) throw new Error(`${time} must be a number`);
-  if (time > MAX_TIME) throw new ULIDError(`cannot encode time greater than ${MAX_TIME}`);
-  if (time < 0) throw new ULIDError('time must be positive');
-  if (!Number.isInteger(time)) throw new ULIDError('time must be an integer');
-
-  let encoded = '';
-  let currentTime = time;
-  
-  while (length > 0) {
-    const mod = currentTime % BASE32_LENGTH;
-    encoded = BASE32_ALPHABET.charAt(mod) + encoded;
-    currentTime = (currentTime - mod) / BASE32_LENGTH;
-    length--;
-  }
-
-  return encoded;
-}
-
-function encodeRandom(length, random) {
-  let encoded = '';
-  while (length > 0) {
-    encoded += randomChar(random);
-    length--;
-  }
-  return encoded;
-}
-
-function detectPrng(allowInsecure = false, environment = typeof window !== 'undefined' ? window : null) {
-  const crypto = environment && (environment.crypto || environment.msCrypto);
-  
-  if (crypto) {
-    return () => {
-      const array = new Uint8Array(1);
-      crypto.getRandomValues(array);
-      return array[0] / 255;
-    };
-  }
-
-  try {
-    const nodeCrypto = require('crypto');
-    return () => nodeCrypto.randomBytes(1).readUInt8() / 255;
-  } catch (error) {
-    if (allowInsecure) {
-      console.error('Secure crypto unusable, falling back to insecure Math.random()!');
-      return () => Math.random();
-    } else {
-      throw new ULIDError('secure crypto unusable, insecure Math.random not allowed');
+    if (charIndex === maxCharIndex) {
+      str = replaceCharAt(str, index, ENCODING[0]);
+      continue;
     }
+    done = replaceCharAt(str, index, ENCODING[charIndex + 1]);
   }
+  if (typeof done === "string") {
+    return done;
+  }
+  throw createError("cannot increment this string");
 }
 
-function ulidFactory(prng) {
-  prng = prng || detectPrng();
-  
-  return (timestamp = Date.now()) => {
-    return encodeTime(timestamp, TIME_LENGTH) + encodeRandom(RANDOM_LENGTH, prng);
-  };
+function randomChar(prng) {
+  let rand = Math.floor(prng() * ENCODING_LEN);
+  if (rand === ENCODING_LEN) {
+    rand = ENCODING_LEN - 1;
+  }
+  return ENCODING.charAt(rand);
 }
 
-function decodeTime(ulid) {
-  if (ulid.length !== TIME_LENGTH + RANDOM_LENGTH) {
-    throw new ULIDError('malformed ulid');
+function encodeTime(now, len) {
+  if (isNaN(now)) {
+    throw new Error(now + " must be a number");
   }
-
-  const timePart = ulid.substr(0, TIME_LENGTH);
-  const time = timePart.split('').reverse().reduce((acc, char, index) => {
-    const charIndex = BASE32_ALPHABET.indexOf(char);
-    if (charIndex === -1) throw new ULIDError(`invalid character found: ${char}`);
-    return acc + charIndex * Math.pow(BASE32_LENGTH, index);
-  }, 0);
-
-  if (time > MAX_TIME) {
-    throw new ULIDError('malformed ulid, timestamp too large');
+  if (now > TIME_MAX) {
+    throw createError("cannot encode time greater than " + TIME_MAX);
   }
+  if (now < 0) {
+    throw createError("time must be positive");
+  }
+  if (Number.isInteger(now) === false) {
+    throw createError("time must be an integer");
+  }
+  let mod;
+  let str = "";
+  for (; len > 0; len--) {
+    mod = now % ENCODING_LEN;
+    str = ENCODING.charAt(mod) + str;
+    now = (now - mod) / ENCODING_LEN;
+  }
+  return str;
+}
 
+function encodeRandom(len, prng) {
+  let str = "";
+  for (; len > 0; len--) {
+    str = randomChar(prng) + str;
+  }
+  return str;
+}
+
+function decodeTime(id) {
+  if (id.length !== TIME_LEN + RANDOM_LEN) {
+    throw createError("malformed ulid");
+  }
+  var time = id
+    .substr(0, TIME_LEN)
+    .split("")
+    .reverse()
+    .reduce((carry, char, index) => {
+      const encodingIndex = ENCODING.indexOf(char);
+      if (encodingIndex === -1) {
+        throw createError("invalid character found: " + char);
+      }
+      return (carry += encodingIndex * Math.pow(ENCODING_LEN, index));
+    }, 0);
+  if (time > TIME_MAX) {
+    throw createError("malformed ulid, timestamp too large");
+  }
   return time;
 }
 
-function monotonicFactory(prng) {
-  prng = prng || detectPrng();
-  let lastTime = 0;
-  let lastRandom;
+function detectPrng(allowInsecure = false, root) {
+  if (!root) {
+    root = typeof window !== "undefined" ? window : null;
+  }
 
-  return (timestamp = Date.now()) => {
-    if (timestamp <= lastTime) {
-      lastRandom = incrementBase32(lastRandom);
-      return encodeTime(lastTime, TIME_LENGTH) + lastRandom;
+  const browserCrypto = root && (root.crypto || root.msCrypto);
+
+  if (browserCrypto) {
+    return () => {
+      const buffer = new Uint8Array(1);
+      browserCrypto.getRandomValues(buffer);
+      return buffer[0] / 0xff;
+    };
+  } else {
+    try {
+      const nodeCrypto = require("crypto");
+      return () => nodeCrypto.randomBytes(1).readUInt8() / 0xff;
+    } catch (e) {}
+  }
+
+  if (allowInsecure) {
+    try {
+      console.error("secure crypto unusable, falling back to insecure Math.random()!");
+    } catch (e) {}
+    return () => Math.random();
+  }
+
+  throw createError("secure crypto unusable, insecure Math.random not allowed");
+}
+
+function factory(currPrng) {
+  if (!currPrng) {
+    currPrng = detectPrng();
+  }
+  return function ulid(seedTime) {
+    if (isNaN(seedTime)) {
+      seedTime = Date.now();
     }
-
-    lastTime = timestamp;
-    lastRandom = encodeRandom(RANDOM_LENGTH, prng);
-    return encodeTime(timestamp, TIME_LENGTH) + lastRandom;
+    return encodeTime(seedTime, TIME_LEN) + encodeRandom(RANDOM_LEN, currPrng);
   };
 }
 
-export {
-  replaceCharAt,
-  incrementBase32,
-  randomChar,
-  encodeTime,
-  encodeRandom,
-  decodeTime,
-  detectPrng,
-  ulidFactory as ulid,
-  monotonicFactory
-};
+function monotonicFactory(currPrng) {
+  if (!currPrng) {
+    currPrng = detectPrng();
+  }
+  let lastTime = 0;
+  let lastRandom;
+  return function ulid(seedTime) {
+    if (isNaN(seedTime)) {
+      seedTime = Date.now();
+    }
+    if (seedTime <= lastTime) {
+      const incrementedRandom = (lastRandom = incrementBase32(lastRandom));
+      return encodeTime(lastTime, TIME_LEN) + incrementedRandom;
+    }
+    lastTime = seedTime;
+    const newRandom = (lastRandom = encodeRandom(RANDOM_LEN, currPrng));
+    return encodeTime(seedTime, TIME_LEN) + newRandom;
+  };
+}
+
+export default factory()
