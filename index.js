@@ -137,7 +137,7 @@ const runFrontend = async (x) => {
 
       const dom = await x.p('docMkElement', {
         attributes: { id },
-        class: 'block',
+        class: 'object',
       })
       target.append(dom)
 
@@ -207,9 +207,7 @@ const runBackend = async (x) => {
       const list = await x.p('fs', { readdir: { path: statePath } })
       const r = []
       for (let i of list) {
-        const str = await x.p('fs', {
-          get: { path: `${statePath}/${i}` },
-        })
+        const str = await x.p('fs', { get: { path: `${statePath}/${i}` } })
         r.push(str.toString())
       }
       return r
@@ -415,6 +413,24 @@ const runBackend = async (x) => {
 
 ;(async () => {
 
+  const events = [
+    { test: 1 },
+    { test: 24 }
+  ]
+  //create proxy from array and on push run eventLine
+  //mix in x in every event
+
+  //push run eventLine
+  async function* runEventQeueu() {
+
+    for (const val of events) {
+      console.log(val)
+    }
+
+    yield await Promise.resolve('a');
+    yield await Promise.resolve('b');
+  }
+  
   const X = () => {
     const x = {
       events: {},

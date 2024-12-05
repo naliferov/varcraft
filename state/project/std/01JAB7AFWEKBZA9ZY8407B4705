@@ -1,1 +1,1 @@
-{"code":"//16 step sequencer editor\n//creative_capital and other fonds\n\nconst { x, o, dom } = $\nawait x.p('sequencer', { dom, o })\n\n","id":"01JAB7AFWEKBZA9ZY8407B4705","steps":[1,1,0,1,0,1,1,1,0,0,0,0,0,0,0,0]}
+{"code":"//16 step sequencer editor\n//creative_capital and other fonds\n\nconst { x, o, dom } = $\n//await x.p('sequencer', { dom, o })\n\n","id":"01JAB7AFWEKBZA9ZY8407B4705","steps":[1,1,1,1,0,0,1,1,0,0,0,0,0,0,0,0]}
