@@ -1,0 +1,1 @@
+{"id":"01JEEGZHFSHXWB42XXG3FNG63S","code":"const { x, o, dom } = $\n\nawait x.p('stdObjectControls', { target: dom, o })\n\nconst contextMenu = await x.p('docMkElement', { tag: 'div', class: 'context-menu' })\n\n\n","name":"stdContextMenu"}

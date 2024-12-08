@@ -1,7 +1,7 @@
 const runFrontend = async (x) => {
 
   x.s('docMkElement', (x) => {
-    const { id, tag, txt, html, events, css, attributes } = x
+    const { id, tag, txt, html, events, css, attrs, attributes } = x
 
     const o = document.createElement(tag || 'div')
     if (id) o.id = id
@@ -13,6 +13,7 @@ const runFrontend = async (x) => {
     if (html) o.innerHTML = html
     if (css) for (let k in css) o.style[k] = css[k]
     if (attributes) for (let k in attributes) o.setAttribute(k, attributes[k])
+    if (attrs) for (let k in attrs) o.setAttribute(k, attrs[k])
     if (events) for (let k in events) o.addEventListener(k, events[k])
 
     return o
@@ -25,26 +26,27 @@ const runFrontend = async (x) => {
 
     const makeObjectObservable = (obj) => {
       for (const key in obj) {
-        if (isObj(obj[key])) {
+        if (isObj(obj[key]) && key !== '_') {
           obj[key] = makeObjectObservable(obj[key])
         }
       }
 
       return new Proxy(obj, {
-        set: (target, property, value) => {
+        set: (target, prop, value) => {
           if (isObj(value)) {
             value = makeObjectObservable(value)
           }
-          if (Array.isArray(target) && property === 'length') {
-            return true
-          }
+          if (Array.isArray(target) && prop === 'length') return true
 
-          target[property] = value
+          target[prop] = value
+
+          if (prop === '_') return true
+
           updateCallback()
           return true
         },
-        deleteProperty: (target, property) => {
-          delete target[property]
+        deleteProperty: (target, prop) => {
+          delete target[prop]
           updateCallback()
           return true
         },
@@ -76,6 +78,7 @@ const runFrontend = async (x) => {
     return await x.p('port', { event: 'get', data: x })
   })
   x.s('getDomById', async (x) => document.getElementById(x.id))
+
 
   const objects = {}
 
@@ -126,7 +129,7 @@ const runFrontend = async (x) => {
     selection.addRange(range)
   }
 
-  x.s('renderObject', async (x) => {
+  x.s('renderMainObject', async (x) => {
     const { target, object: objectData, updateOnInput } = x
     
       const oData = JSON.parse(objectData)
@@ -172,9 +175,13 @@ const runFrontend = async (x) => {
   const app = await x.p('docMkElement', { id: 'app' })
   document.body.append(app)
 
-  const mainObject = await x.p('get', { project: 'std', get: { id: 'main' } })
-  await x.p('renderObject', { target: app, object: mainObject.object, updateOnInput: true })
-  return
+  const stdMainObject = await x.p('get', { project: 'std', get: { id: 'main' } })
+  await x.p('renderMainObject', { target: app, object: stdMainObject.object, updateOnInput: true })
+
+  //const { codeEditorFactory } = await import('/module/codeEditor.js')
+  //const codeEditor = codeEditorFactory()
+  //const codeEditorDom = await codeEditor.init(x, 'some code')
+  //app.append(codeEditorDom)
 }
 
 const runBackend = async (x) => {
@@ -284,18 +291,17 @@ const runBackend = async (x) => {
   })
 
   await x.s('getHtml', async (x) => {
+    const fontUrl = `https://fonts.googleapis.com/css2?family`
     return {
       v: `
-  <!DOCTYPE html>
-  <html>
+  <!DOCTYPE html><html>
   <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link href="${fontUrl}=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <link href="${fontUrl}=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   </head>
-  <body>
-    <script type="module" src="/index.js?${Date.now()}"></script>
-  </body>
-  </html>
+  <body><script type="module" src="/index.js?${Date.now()}"></script></body></html>
       `,
       isHtml: true,
     }
@@ -447,7 +453,7 @@ const runBackend = async (x) => {
           const { promise, resolve } = Promise.withResolvers()
           events[event].push({ data, resolve })
 
-          console.log(`[${event}] > future`)
+          console.log(`deffered event [${event}]`)
           return promise
         }
 
@@ -464,7 +470,7 @@ const runBackend = async (x) => {
         const events = this.events[event]
         if (!events) return this
 
-        console.log(`past > [${event}]`)
+        console.log(`executed deffered event > [${event}]`)
         for (const { data, resolve } of events) {
           const response = await this.p(event, data)
           resolve(response)

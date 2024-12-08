@@ -1,0 +1,1 @@
+{"id":"01JEEW4BW4BR3MT9M1W1JPB18T","code":"const { x, o, dom } = $\n\nawait x.p('stdObjectControls', { target: dom, o })\n","name":"projectLoader"}
