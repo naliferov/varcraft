@@ -418,25 +418,7 @@ const runBackend = async (x) => {
 }
 
 ;(async () => {
-
-  const events = [
-    { test: 1 },
-    { test: 24 }
-  ]
-  //create proxy from array and on push run eventLine
-  //mix in x in every event
-
-  //push run eventLine
-  async function* runEventQeueu() {
-
-    for (const val of events) {
-      console.log(val)
-    }
-
-    yield await Promise.resolve('a');
-    yield await Promise.resolve('b');
-  }
-  
+    
   const X = () => {
     const x = {
       events: {},
