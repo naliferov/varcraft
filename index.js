@@ -400,5 +400,6 @@ const runBackend = async (x) => {
 }
 
 ;(async () => {
+  //import x from pubsubbus
   //globalThis.Window ? runFrontend(x) : runBackend(x)
 })()

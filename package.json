@@ -1,3 +1,22 @@
 {
-  "type": "module"
+  "name": "js-box",
+  "version": "1.0.0",
+  "description": "javascript sandbox",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/username/repository.git"
+  },
+  "keywords": ["npm", "javascript", "sandbox"],
+  "author": "Nikolay Aliferov <x8core@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/naliferov/js-box",
+  "dependencies": {
+    "express": "^4.17.1"
+  }
 }
