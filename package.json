@@ -16,7 +16,5 @@
   "author": "Nikolay Aliferov <x8core@gmail.com>",
   "license": "MIT",
   "homepage": "https://github.com/naliferov/js-box",
-  "dependencies": {
-    "express": "^4.17.1"
-  }
+  "dependencies": {}
 }
