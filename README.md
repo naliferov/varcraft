@@ -1,4 +1,4 @@
-# js.sandbox
+# js-box
 Javascript sandbox
 
 Edit Users,
