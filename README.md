@@ -1,10 +1,10 @@
 # js-box
 Javascript sandbox
 
-Edit Users,
-Editor Projects,
+Editor of Users, projects,
 Editor of code objects
 Using a generator for executing javascript, with operations counter, or tools for limit mem and cpu usage
 
 Sign in, Sign Up, Sign Out
-Add block, Duplicate block, save block
+Add object, Duplicate object, save object
+Hightlight interface of objects
