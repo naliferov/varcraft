@@ -12,9 +12,15 @@
     "type": "git",
     "url": "git+https://github.com/naliferov/js-box.git"
   },
-  "keywords": ["npm", "javascript", "sandbox"],
+  "keywords": [
+    "npm",
+    "javascript",
+    "sandbox"
+  ],
   "author": "Nikolay Aliferov <x8core@gmail.com>",
   "license": "MIT",
   "homepage": "https://github.com/naliferov/js-box",
-  "dependencies": {}
+  "dependencies": {
+    "psbus": "^1.0.0"
+  }
 }
