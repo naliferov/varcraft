@@ -419,13 +419,7 @@ const runBackend = async (x) => {
 }
 
 ;(async () => {
-
   const { psbus } = await import('./module/psbus.js')
   const x = psbus()
-
-  if (globalThis.Window) {
-    runFrontend(x)
-  } else {
-    runBackend(x)
-  }  
+  globalThis.Window ? runFrontend(x) : runBackend(x)
 })()
