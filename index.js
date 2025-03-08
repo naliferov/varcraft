@@ -225,8 +225,6 @@ const runBackend = async (x) => {
     ext = split.at(-1)
     if (!split) return {}
 
-    console.log()
-
     mime = {
       html: 'text/html',
       js: 'text/javascript',
