@@ -168,8 +168,8 @@ const runBackend = async (x) => {
     return { id, data }
   })
   x.s('get', async (x) => {
-    let { auth, project, get, getAll } = x
-    const path = 'project/' + project
+    let { auth, project = 'std', get, getAll } = x
+    const path = `project/${project}`
 
     if (getAll) return await x.p('state', { auth, path, getAll })
     if (get) return await x.p('state', { auth, path, get })
@@ -204,9 +204,9 @@ const runBackend = async (x) => {
     const { promises: fs } = await import('node:fs')
     try {
       if (x.set) return await fs.writeFile(x.set.path, x.set.data)
-      if (x.get) return await fs.readFile(x.get.path)
-      if (x.del) return await fs.unlink(x.del.path)
-      if (x.readdir) return await fs.readdir(x.readdir.path)
+      else if (x.get) return await fs.readFile(x.get.path)
+      else if (x.del) return await fs.unlink(x.del.path)
+      else if (x.readdir) return await fs.readdir(x.readdir.path)
     } catch (e) {
       console.log(e)
     }
