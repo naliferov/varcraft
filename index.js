@@ -162,9 +162,9 @@ const runFrontend = async (x) => {
       dom.append(pre)
 
       const code = `export default async ($) => { ${object.code} }`
-      const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }))
+      const blob = new Blob([code], { type: 'application/javascript' })
       try {
-        const m = await import(url)
+        const m = await import(URL.createObjectURL(blob))
         m.default({ x, o: object, dom, id, sysId: id, domId: id })
       } catch (e) {
         console.error(e)
@@ -185,8 +185,8 @@ const runFrontend = async (x) => {
 
 const runBackend = async (x) => {
   x.s('set', async (x) => {
-    const { auth, project, id, data } = x
-    const path = `project/std/${id}`
+    const { auth, project = 'std', id, data } = x
+    const path = `project/${project}/${id}`
 
     await x.p('state', { path, set: { data } })
     return { id, data }
@@ -235,19 +235,13 @@ const runBackend = async (x) => {
       console.log(e)
     }
   })
-  x.s('getStdBlocks', async (x) => {})
-  x.s('getUserBlocks', async (x) => {})
-  x.s('signUp', async (x) => {
-    //check user by user name
-  })
-  x.s('signIn', async (x) => {
-    //check user by user name
-  })
+  x.s('signUp', async (x) => {})
+  x.s('signIn', async (x) => {})
   x.s('httpGetFile', async (x) => {
     const { ctx } = x
     const pathname = ctx.url.pathname
     if (pathname === '/favicon.ico') return { fileNotFound: true }
-    //todo block rq to state dir
+    //todo block direct request to state dir
 
     let ext, mime
     const split = pathname.split('/').pop().split('.')
@@ -275,12 +269,12 @@ const runBackend = async (x) => {
     }
   })
 
-  await x.s('httpMkResp', async ({ code = 200, mime, v, isBin }) => {
-    const send = (value, typeHeader) => ({
-      status: code,
-      value,
-      headers: { 'content-type': typeHeader },
-    })
+  await x.s('httpMkResp', async ({ statusCode = 200, mime, v, isBin }) => {
+    const send = (value, contentType) => {
+      const headers = {}
+      if (contentType) headers['content-type'] = contentType
+      return { statusCode, value, headers }
+    }
     const plain = 'text/plain; charset=utf-8'
 
     if (isBin) return send(v, mime ?? '')
@@ -365,8 +359,8 @@ const runBackend = async (x) => {
     ctx.url.searchParams.forEach((v, k) => (ctx.query[k] = v))
     const r = await x.p('httpGetFile', { ctx, fs })
 
-    if (r.file) return await x.p('httpMkResp', { v: r.file, mime: r.mime, isBin: true })
     if (r.fileNotFound) return await x.p('httpMkResp', { code: 404, v: 'File not found' })
+    else if (r.file) return await x.p('httpMkResp', { v: r.file, mime: r.mime, isBin: true })
 
     let msg = await x.p('httpGetBody', { ctx })
     if (!msg) msg = {}
@@ -376,6 +370,7 @@ const runBackend = async (x) => {
     //   msg.event = msg.binMeta.event
     //   msg.data = { ...msg.binMeta, v: msg.bin }
     // }
+
     if (Object.keys(msg).length < 1) msg.event = 'getHtml'
 
     const o = await x.p(msg.event, msg.data)
@@ -402,7 +397,7 @@ const runBackend = async (x) => {
       })
       try {
         const r = await x.p('httpHandler', { runtimeCtx: ctx, rq })
-        rs.writeHead(r.status, r.headers).end(r.value)
+        rs.writeHead(r.statusCode, r.headers).end(r.value)
       } catch (e) {
         const m = 'err in rqHandler'
         console.log(m, e)
