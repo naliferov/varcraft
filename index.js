@@ -91,27 +91,6 @@ const runFrontend = async (x) => {
     await x.p('set', { id, data: JSON.stringify(object) })
   })
 
-  const remove4CharsBeforeCursor = () => {
-    const selection = window.getSelection();
-    if (!selection.rangeCount) return;
-  
-    const range = selection.getRangeAt(0);
-    const startOffset = range.startOffset;
-  
-    if (startOffset >= 4) {
-      const currentNode = range.startContainer;
-      const cursorPosition = startOffset - 4;
-  
-      range.setStart(range.startContainer, cursorPosition);
-      range.deleteContents();
-      range.setStart(currentNode, cursorPosition)
-      range.collapse(true)
-  
-      selection.removeAllRanges();
-      //selection.addRange(range);
-    }
-  }
-
   const insertTxtAtCursor = (text) => {
     const selection = window.getSelection()
     if (!selection.rangeCount) return
@@ -129,53 +108,50 @@ const runFrontend = async (x) => {
   }
 
   x.s('renderMainObject', async (x) => {
-    const { target, object: objectData, updateOnInput } = x
+    const { target, object: objectData } = x
     
-      const oData = JSON.parse(objectData)
-      const id = oData.id
+    const oData = JSON.parse(objectData)
+    const id = oData.id
 
-      objects[id] = await x.p('oFactory', { state: oData })
-      const object = objects[id]
+    objects[id] = await x.p('oFactory', { state: oData })
+    const object = objects[id]
 
-      const dom = await x.p('docMkElement', {
-        attributes: { id },
-        class: 'object',
-      })
-      target.append(dom)
+    const dom = await x.p('docMkElement', {
+      attributes: { id },
+      class: 'object',
+    })
+    target.append(dom)
 
-      const pre = await x.p('docMkElement', { tag: 'pre', class: 'object-code' })
-      pre.setAttribute('contenteditable', 'plaintext-only')
-      pre.setAttribute('object-id', id)
-      pre.innerText = object.code
-      pre.addEventListener('keydown', (e) => {
-        if (e.key !== 'Tab') return
-        e.preventDefault()
-        if (e.shiftKey) {
-          remove4CharsBeforeCursor()
-          return
-        }
-        insertTxtAtCursor('    ')
-      })
-      if (updateOnInput) {
-        pre.addEventListener('input', () => object.code = pre.innerText)
-      }
-      dom.append(pre)
+    const pre = await x.p('docMkElement', { tag: 'pre', class: 'object-code' })
+    pre.setAttribute('contenteditable', 'plaintext-only')
+    pre.setAttribute('object-id', id)
+    pre.innerText = object.code
+    pre.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return
+      e.preventDefault()
+      insertTxtAtCursor('    ')
+    })
+    pre.addEventListener('input', async () => {
+      const object = await x.p('getObject', { id })
+      object.code = pre.innerText
+    })
+    dom.append(pre)
 
-      const code = `export default async ($) => { ${object.code} }`
-      const blob = new Blob([code], { type: 'application/javascript' })
-      try {
-        const m = await import(URL.createObjectURL(blob))
-        m.default({ x, o: object, dom, id, sysId: id, domId: id })
-      } catch (e) {
-        console.error(e)
-      }
+    const code = `export default async ($) => { ${object.code} }`
+    const blob = new Blob([code], { type: 'application/javascript' })
+    try {
+      const m = await import(URL.createObjectURL(blob))
+      m.default({ x, o: object, dom, id, sysId: id, domId: id })
+    } catch (e) {
+      console.error(e)
+    }
   })
 
   const app = await x.p('docMkElement', { id: 'app' })
   document.body.append(app)
 
   const stdMainObject = await x.p('get', { project: 'std', get: { id: 'main' } })
-  await x.p('renderMainObject', { target: app, object: stdMainObject.object, updateOnInput: true })
+  await x.p('renderMainObject', { target: app, object: stdMainObject.object })
 
   //const { codeEditorFactory } = await import('/module/codeEditor.js')
   //const codeEditor = codeEditorFactory()
