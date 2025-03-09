@@ -1,1 +1,1 @@
-{"id":"01JF0KTTCS21CHV5CDJHA6VYX5","code":"\nconst { x, o, dom } = $\nawait x.p('stdObjectControls', { target: dom, o })\n\n//every object can be with docs","name":"get started (docs)"}
+{"id":"01JF0KTTCS21CHV5CDJHA6VYX5","code":"\nconst { x, o, dom } = $\nawait x.p('stdObjectControls', { target: dom, o })\n\n//every object can be with docs","name":"std.get started (docs)"}

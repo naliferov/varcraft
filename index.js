@@ -18,25 +18,26 @@ const runFrontend = async (x) => {
     return o
   })
 
-  x.s('oFactory', async (x) => {
-    const state = x.state
-    const isObj = (o) => typeof o === 'object' && o !== null
-    const updateCallback = () => x.p('saveObject', { id: state.id })
+  x.s('objectFactory', async (x) => {
+    const { oData } = x
 
-    const makeObjectObservable = (obj) => {
-      for (const key in obj) {
-        if (isObj(obj[key]) && key !== '_') {
-          obj[key] = makeObjectObservable(obj[key])
+    const isObj = (o) => typeof o === 'object' && o !== null
+    const updateCallback = () => x.p('saveObject', { id: oData.id })
+    const mkObservable = (obj) => {
+      for (const k in obj) {
+        if (isObj(obj[k]) && k !== '_') {
+          obj[k] = mkObservable(obj[k])
         }
       }
 
       return new Proxy(obj, {
         set: (target, prop, value) => {
           if (isObj(value)) {
-            value = makeObjectObservable(value)
+            value = mkObservable(value)
           }
           if (Array.isArray(target) && prop === 'length') return true
 
+          //create oplog item and store it in operations, sync operation with other nodes
           target[prop] = value
 
           if (prop === '_') return true
@@ -51,10 +52,11 @@ const runFrontend = async (x) => {
         },
       })
     }
-    return makeObjectObservable(state)
+
+    return mkObservable(oData)
   })
 
-  x.s('port', async (x) => {
+  x.s('server.send', async (x) => {
     const bin = x?.data?.bin
     const headers = { 'content-type': 'application/json' }
     if (bin) {
@@ -70,26 +72,28 @@ const runFrontend = async (x) => {
   })
   x.s('set', async (x) => {
     if (x.repo === 'idb') return await idb.set(x)
-    return await x.p('port', { event: 'set', data: x })
+    return await x.p('server.send', { event: 'set', data: x })
   })
   x.s('get', async (x) => {
     if (x.repo === 'idb') return await idb.get(x)
-    return await x.p('port', { event: 'get', data: x })
+    return await x.p('server.send', { event: 'get', data: x })
   })
   x.s('getDomById', async (x) => document.getElementById(x.id))
 
+  const objectStorageInit = (x) => {
+    const objects = {}
 
-  const objects = {}
+    x.s('getObject', (x) => objects[x.id])
+    x.s('setObject', async (x) => objects[x.o.id] = x.o)
+    x.s('saveObject', async (x) => {
+      const id = x.id
+      const object = objects[id]
+      if (!object) return
 
-  x.s('getObject', (x) => objects[x.id])
-  x.s('setObject', async (x) => objects[x.o.id] = x.o)
-  x.s('saveObject', async (x) => {
-    const id = x.id
-    const object = objects[id]
-    if (!object) return
-
-    await x.p('set', { id, data: JSON.stringify(object) })
-  })
+      await x.p('set', { id, data: JSON.stringify(object) })
+    })
+  }
+  objectStorageInit(x)
 
   const insertTxtAtCursor = (text) => {
     const selection = window.getSelection()
@@ -113,8 +117,9 @@ const runFrontend = async (x) => {
     const oData = JSON.parse(objectData)
     const id = oData.id
 
-    objects[id] = await x.p('oFactory', { state: oData })
-    const object = objects[id]
+    //change to object id usage
+    const object = await x.p('objectFactory', { oData })
+    await x.p('setObject', { o: object })
 
     const dom = await x.p('docMkElement', {
       attributes: { id },
