@@ -165,6 +165,7 @@ const runFrontend = async (x) => {
 }
 
 const runBackend = async (x) => {
+
   x.s('set', async (x) => {
     const { auth, project = 'std', id, data } = x
     const path = `project/${project}/${id}`
@@ -207,6 +208,7 @@ const runBackend = async (x) => {
   })
   x.s('fs', async (x) => {
     const { promises: fs } = await import('node:fs')
+
     try {
       if (x.set) return await fs.writeFile(x.set.path, x.set.data)
       else if (x.get) return await fs.readFile(x.get.path)
@@ -362,7 +364,24 @@ const runBackend = async (x) => {
     return await x.p('httpMkResp', { v: o })
   })
 
-  await x.s('startServer', async (x) => {
+  const { default: pg } = await import('pg')
+  const { Client } = pg
+  const client = new Client({
+    host: 'localhost',
+    port: 5432,
+    user: 'sandbox',
+    password: 'pass',
+    database: 'jsbox',
+  })
+  await client.connect()
+
+  
+  
+  // const res = await client.query('SELECT $1::text as message', ['Hello world!'])
+  // console.log(res.rows[0].message) // Hello world!
+  // await client.end()
+
+  await x.s('serverStart', async (x) => {
     const server = (await import('node:http')).createServer({
       requestTimeout: 30000,
     })
@@ -389,7 +408,7 @@ const runBackend = async (x) => {
       console.log(`server start on port: [${port}]`)
     )
   })
-  await x.p('startServer')
+  await x.p('serverStart')
 }
 
 ;(async () => {

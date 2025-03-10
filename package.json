@@ -21,6 +21,7 @@
   "license": "MIT",
   "homepage": "https://github.com/naliferov/js-box",
   "dependencies": {
+    "pg": "^8.13.3",
     "psbus": "^1.0.0"
   }
 }
