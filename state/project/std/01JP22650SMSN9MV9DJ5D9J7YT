@@ -1,0 +1,1 @@
+{"id":"01JP22650SMSN9MV9DJ5D9J7YT","code":"\nconst { x, o, dom } = $\nawait x.p('stdObjectControls', { target: dom, o })\n","name":"std.storage"}
