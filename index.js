@@ -364,21 +364,25 @@ const runBackend = async (x) => {
     return await x.p('httpMkResp', { v: o })
   })
 
-  const { default: pg } = await import('pg')
-  const { Client } = pg
-  const client = new Client({
-    host: 'localhost',
-    port: 5432,
-    user: 'sandbox',
-    password: 'pass',
-    database: 'jsbox',
-  })
-  await client.connect()
+  // const { default: pg } = await import('pg')
+  // const client = new pg.Client({
+  //   host: 'localhost',
+  //   port: 5432,
+  //   user: 'sandbox',
+  //   password: 'pass',
+  //   database: 'js-box',
+  // })
+  // await client.connect()
 
-  
-  
-  // const res = await client.query('SELECT $1::text as message', ['Hello world!'])
-  // console.log(res.rows[0].message) // Hello world!
+  // const res = await client.query(`
+  //   CREATE TABLE objects (
+  //     id SERIAL PRIMARY KEY,
+  //     data JSONB NOT NULL,
+  //     previous_id INTEGER REFERENCES objects(id) ON DELETE SET NULL,
+  //     next_id INTEGER REFERENCES objects(id) ON DELETE SET NULL
+  //   );
+  // `)
+  // console.log(res)
   // await client.end()
 
   await x.s('serverStart', async (x) => {
