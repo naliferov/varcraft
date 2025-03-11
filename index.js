@@ -386,9 +386,7 @@ const runBackend = async (x) => {
   // await client.end()
 
   await x.s('serverStart', async (x) => {
-    const server = (await import('node:http')).createServer({
-      requestTimeout: 30000,
-    })
+    const server = (await import('node:http')).createServer({ requestTimeout: 30000 })
     const ctx = { filename: process.argv[1].split('/').at(-1) }
     const port = process.env.PORT || 3000
 
