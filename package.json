@@ -1,6 +1,6 @@
 {
   "name": "js-box",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "javascript sandbox",
   "main": "index.js",
   "type": "module",
@@ -19,9 +19,5 @@
   ],
   "author": "Nikolay Aliferov <x8core@gmail.com>",
   "license": "MIT",
-  "homepage": "https://github.com/naliferov/js-box",
-  "dependencies": {
-    "pg": "^8.13.3",
-    "psbus": "^1.0.0"
-  }
+  "homepage": "https://github.com/naliferov/js-box"
 }

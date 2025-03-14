@@ -1,108 +1,13 @@
 const runFrontend = async (x) => {
 
-  x.s('docMkElement', (x) => {
-    const { id, tag, txt, html, events, css, attributes } = x
-
-    const o = document.createElement(tag || 'div')
-    if (id) o.id = id
-    if (x['class'])
-      o.className = Array.isArray(x['class'])
-        ? x['class'].join(' ')
-        : x['class']
-    if (txt) o.innerText = txt
-    if (html) o.innerHTML = html
-    if (css) for (let k in css) o.style[k] = css[k]
-    if (attributes) for (let k in attributes) o.setAttribute(k, attributes[k])
-    if (events) for (let k in events) o.addEventListener(k, events[k])
-
-    return o
-  })
-
-  x.s('objectFactory', async (x) => {
-    const { oData } = x
-
-    const isObj = (o) => typeof o === 'object' && o !== null
-    const updateCallback = () => x.p('saveObject', { id: oData.id })
-    const mkObservable = (obj) => {
-      for (const k in obj) {
-        if (isObj(obj[k]) && k !== '_') {
-          obj[k] = mkObservable(obj[k])
-        }
-      }
-
-      return new Proxy(obj, {
-        set: (target, prop, value) => {
-          if (isObj(value)) {
-            value = mkObservable(value)
-          }
-          if (Array.isArray(target) && prop === 'length') return true
-
-          //create oplog item and store it in operations, sync operation with other nodes
-          target[prop] = value
-
-          if (prop === '_') return true
-
-          updateCallback()
-          return true
-        },
-        deleteProperty: (target, prop) => {
-          delete target[prop]
-          updateCallback()
-          return true
-        },
-      })
-    }
-
-    return mkObservable(oData)
-  })
-
-  x.s('server.send', async (x) => {
-    const bin = x?.data?.bin
-    const headers = { 'content-type': 'application/json' }
-    if (bin) {
-      headers['content-type'] = 'application/octet-stream'
-      headers['bin-meta'] = JSON.stringify(x.data.binMeta)
-    }
-    const r = await fetch('/', {
-      method: 'POST',
-      headers,
-      body: bin || JSON.stringify(x),
-    })
-    return r.json()
-  })
-  x.s('set', async (x) => {
-    if (x.repo === 'idb') return await idb.set(x)
-    return await x.p('server.send', { event: 'set', data: x })
-  })
-  x.s('get', async (x) => {
-    if (x.repo === 'idb') return await idb.get(x)
-    return await x.p('server.send', { event: 'get', data: x })
-  })
-  x.s('getDomById', async (x) => document.getElementById(x.id))
-
-  const objectStorageInit = (x) => {
-    const objects = {}
-
-    x.s('getObject', (x) => objects[x.id])
-    x.s('setObject', async (x) => objects[x.o.id] = x.o)
-    x.s('saveObject', async (x) => {
-      const id = x.id
-      const object = objects[id]
-      if (!object) return
-
-      await x.p('set', { id, data: JSON.stringify(object) })
-    })
-  }
-  objectStorageInit(x)
-
-  const insertTxtAtCursor = (text) => {
+  const insertTxtAtCursor = (txt) => {
     const selection = window.getSelection()
     if (!selection.rangeCount) return
 
     const range = selection.getRangeAt(0)
     range.deleteContents()
 
-    const textNode = document.createTextNode(text)
+    const textNode = document.createTextNode(txt)
     range.insertNode(textNode)
 
     range.setStartAfter(textNode)
@@ -111,57 +16,56 @@ const runFrontend = async (x) => {
     selection.addRange(range)
   }
 
-  x.s('renderMainObject', async (x) => {
-    const { target, object: objectData } = x
-    
-    const oData = JSON.parse(objectData)
-    const id = oData.id
+  const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
+  const db = new PGlite('idb://my-pgdata')
+  const app = document.createElement('div')
+  app.id = 'app'
+  document.body.append(app)
 
-    //change to object id usage
-    const object = await x.p('objectFactory', { oData })
-    await x.p('setObject', { o: object })
+  const { rows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
+  const stdMainObject = rows[0]
+  if (!stdMainObject) {
+    console.log('need to import std data backup from backend')
+    return
+  }
 
-    const dom = await x.p('docMkElement', {
-      attributes: { id },
-      class: 'object',
-    })
+  const renderMainObject = async (x) => {
+    const { target, object, db } = x
+
+    const dom = document.createElement('div')
+    dom.id = object.id
+    dom.className = 'object'
     target.append(dom)
 
-    const pre = await x.p('docMkElement', { tag: 'pre', class: 'object-code' })
+    const pre = document.createElement('pre')
+    pre.className = 'object-code'
     pre.setAttribute('contenteditable', 'plaintext-only')
-    pre.setAttribute('object-id', id)
-    pre.innerText = object.code
+    pre.setAttribute('object-id', object.id)
+    pre.innerText = object.data.code
     pre.addEventListener('keydown', (e) => {
       if (e.key !== 'Tab') return
       e.preventDefault()
       insertTxtAtCursor('    ')
     })
     pre.addEventListener('input', async () => {
-      const object = await x.p('getObject', { id })
-      object.code = pre.innerText
+      object.data.code = pre.innerText
+      await db.query(
+        `UPDATE objects SET data = $1 WHERE id = $2`,
+        [JSON.stringify(object.data), 'main']
+      );
     })
     dom.append(pre)
 
-    const code = `export default async ($) => { ${object.code} }`
+    const code = `export default async ($) => { ${object.data.code} }`
     const blob = new Blob([code], { type: 'application/javascript' })
     try {
       const m = await import(URL.createObjectURL(blob))
-      m.default({ x, o: object, dom, id, sysId: id, domId: id })
+      m.default({ x: x.x, o: object, dom, db })
     } catch (e) {
       console.error(e)
     }
-  })
-
-  const app = await x.p('docMkElement', { id: 'app' })
-  document.body.append(app)
-
-  const stdMainObject = await x.p('get', { project: 'std', get: { id: 'main' } })
-  await x.p('renderMainObject', { target: app, object: stdMainObject.object })
-
-  //const { codeEditorFactory } = await import('/module/codeEditor.js')
-  //const codeEditor = codeEditorFactory()
-  //const codeEditorDom = await codeEditor.init(x, 'some code')
-  //app.append(codeEditorDom)
+  }
+  await renderMainObject({ x, target: app, object: stdMainObject, db })
 }
 
 const runBackend = async (x) => {
@@ -364,15 +268,18 @@ const runBackend = async (x) => {
     return await x.p('httpMkResp', { v: o })
   })
 
-  // const { default: pg } = await import('pg')
-  // const client = new pg.Client({
-  //   host: 'localhost',
-  //   port: 5432,
-  //   user: 'sandbox',
-  //   password: 'pass',
-  //   database: 'js-box',
-  // })
-  // await client.connect()
+  //const { PGlite } = await import('@electric-sql/pglite');
+  //const db = new PGlite('./state/dbdata')
+
+  // console.log(await db.query(`
+  //   CREATE TABLE IF NOT EXISTS objects (
+  //       id SERIAL PRIMARY KEY, data JSONB NOT NULL
+  //   );
+  // `));
+
+  // await db.query(`INSERT INTO objects (data) VALUES ($1);`, ['{"name": "alisa"}']);
+  // const r = await db.query(`SELECT * FROM objects`)
+  // console.log(r.rows)
 
   // const res = await client.query(`
   //   CREATE TABLE objects (
