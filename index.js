@@ -37,6 +37,7 @@ const runFrontend = async (x) => {
     dom.className = 'object'
     target.append(dom)
 
+    //todo CodeMirror
     const pre = document.createElement('pre')
     pre.className = 'object-code'
     pre.setAttribute('contenteditable', 'plaintext-only')
@@ -66,19 +67,65 @@ const runFrontend = async (x) => {
     }
   }
   await renderMainObject({ x, target: app, object: stdMainObject, db })
-}
 
+
+  //<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.5/lib/codemirror.js"></script>
+  //<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.5/mode/javascript/javascript.js"></script>
+
+  //console.log(CodeMirror)
+
+  //var editor = CodeMirror.fromTextArea(document.getElementById("code"), {
+  //  lineNumbers: true,      // отображение номеров строк
+  //  mode: "javascript",     // режим подсветки синтаксиса для JavaScript
+   // theme: "dracula"        // тема оформления (если подключена)
+  //});
+
+  const head = document.getElementsByTagName('head')[0]
+  const fontUrl = 'https://fonts.googleapis.com/css2?family';
+  [
+    `${fontUrl}=Roboto:wght@400;700&display=swap`,
+    `${fontUrl}=JetBrains+Mono:wght@400;700&display=swap`
+  ].forEach(url => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = url
+    head.appendChild(link)
+  });
+
+  [
+    'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/lib/codemirror.css',
+    'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/theme/dracula.css'
+  ].forEach(url => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    head.append(link);
+  });
+
+  const scripts = document.getElementsByTagName('script')
+  
+  let script = document.createElement('script')
+  script.setAttribute('src', 'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/lib/codemirror.js')
+  scripts[0].after(script)
+  script.addEventListener('load', function() {
+    //console.log(CodeMirror)
+  })
+
+  let script2 = document.createElement('script')
+  script2.setAttribute('src', 'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/mode/javascript/javascript.js')
+  script.after(script)
+}
 const runBackend = async (x) => {
 
   x.s('set', async (x) => {
-    const { auth, project = 'std', id, data } = x
+    const { project = 'std', id, data } = x
     const path = `project/${project}/${id}`
 
     await x.p('state', { path, set: { data } })
     return { id, data }
   })
   x.s('get', async (x) => {
-    let { auth, project = 'std', get, getAll } = x
+    let { project = 'std', get, getAll } = x
     const path = `project/${project}`
 
     if (getAll) return await x.p('state', { auth, path, getAll })
@@ -122,8 +169,6 @@ const runBackend = async (x) => {
       console.log(e)
     }
   })
-  x.s('signUp', async (x) => {})
-  x.s('signIn', async (x) => {})
   x.s('httpGetFile', async (x) => {
     const { ctx } = x
     const pathname = ctx.url.pathname
@@ -171,15 +216,12 @@ const runBackend = async (x) => {
   })
 
   await x.s('getHtml', async (x) => {
-    const fontUrl = `https://fonts.googleapis.com/css2?family`
     return {
       v: `
   <!DOCTYPE html><html>
   <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <link href="${fontUrl}=Roboto:wght@400;700&display=swap" rel="stylesheet">
-  <link href="${fontUrl}=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   </head>
   <body><script type="module" src="/index.js?${Date.now()}"></script></body></html>
       `,
@@ -267,30 +309,6 @@ const runBackend = async (x) => {
     }
     return await x.p('httpMkResp', { v: o })
   })
-
-  //const { PGlite } = await import('@electric-sql/pglite');
-  //const db = new PGlite('./state/dbdata')
-
-  // console.log(await db.query(`
-  //   CREATE TABLE IF NOT EXISTS objects (
-  //       id SERIAL PRIMARY KEY, data JSONB NOT NULL
-  //   );
-  // `));
-
-  // await db.query(`INSERT INTO objects (data) VALUES ($1);`, ['{"name": "alisa"}']);
-  // const r = await db.query(`SELECT * FROM objects`)
-  // console.log(r.rows)
-
-  // const res = await client.query(`
-  //   CREATE TABLE objects (
-  //     id SERIAL PRIMARY KEY,
-  //     data JSONB NOT NULL,
-  //     previous_id INTEGER REFERENCES objects(id) ON DELETE SET NULL,
-  //     next_id INTEGER REFERENCES objects(id) ON DELETE SET NULL
-  //   );
-  // `)
-  // console.log(res)
-  // await client.end()
 
   await x.s('serverStart', async (x) => {
     const server = (await import('node:http')).createServer({ requestTimeout: 30000 })
