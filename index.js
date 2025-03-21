@@ -18,13 +18,68 @@ const runFrontend = async (x) => {
 
   const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
   const db = new PGlite('idb://my-pgdata')
+
   const app = document.createElement('div')
   app.id = 'app'
   document.body.append(app)
 
+  const objectBrowser = document.createElement('div')
+  objectBrowser.id = 'object-browser'
+  app.append(objectBrowser)
+
+  const mainContainer = document.createElement('div')
+  mainContainer.id = 'main-container'
+  app.append(mainContainer)
+
+  const tabsAPIFactory = (target) => {
+    const tabsPanel = document.createElement('div')
+    tabsPanel.id = 'tabs-panel'
+    target.append(tabsPanel)
+    
+    const tabContainer = document.createElement('div')
+    tabContainer.className = 'tab-container'
+    target.append(tabContainer)
+
+    const objectCode = document.createElement('div')
+    objectCode.className = 'object-code'
+    tabContainer.append(objectCode)
+
+    const objectView = document.createElement('div')
+    objectView.className = 'object-view'
+    tabContainer.append(objectView)
+  
+    const createTab = (name) => {
+      const tab = document.createElement('div')
+      tab.id = name
+      tab.innerText = name
+      tabsPanel.append(tab)
+    }
+    const openTab = (id) => {
+      console.log('openTab', id)
+      // const tab = document.createElement('div')
+      // tab.id = name
+      // tab.innerText = name
+      // tabsPanel.append(tab)
+
+      // const tabContent = document.createElement('div')
+      // tabContent.id = name
+      // tabContent.innerText = name
+      // tabContainer.append(tabContent)
+    }
+
+    return {
+      createTab,
+      openTab,
+    }
+  }
+
+  const tabsAPI = tabsAPIFactory(mainContainer)
+
+  
+
   const { rows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
-  const stdMainObject = rows[0]
-  if (!stdMainObject) {
+  const mainObject = rows[0]
+  if (!mainObject) {
     console.log('need to import std data backup from backend')
     return
   }
@@ -37,7 +92,14 @@ const runFrontend = async (x) => {
     dom.className = 'object'
     target.append(dom)
 
-    //todo CodeMirror
+    const name = document.createElement('div')
+    name.innerText = 'main'
+    name.style.fontWeight = 'bold'
+    name.addEventListener('click', () => {
+      tabsAPI.openTab('main')
+    })
+    dom.append(name)
+
     const pre = document.createElement('pre')
     pre.className = 'object-code'
     pre.setAttribute('contenteditable', 'plaintext-only')
@@ -55,7 +117,7 @@ const runFrontend = async (x) => {
         [JSON.stringify(object.data), 'main']
       );
     })
-    dom.append(pre)
+    //dom.append(pre)
 
     const code = `export default async ($) => { ${object.data.code} }`
     const blob = new Blob([code], { type: 'application/javascript' })
@@ -66,19 +128,35 @@ const runFrontend = async (x) => {
       console.error(e)
     }
   }
-  await renderMainObject({ x, target: app, object: stdMainObject, db })
+  await renderMainObject({ x, target: objectBrowser, object: mainObject, db })
 
+  //delete mainObject.data.id
+  //mainObject.data.code = mainObject.data.code.replace('const dump = ', '//const dump = ')
+  //const pre = document.createElement('pre')
+  //pre.innerText = mainObject.data.code
+  //app.append(pre)
 
-  //<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.5/lib/codemirror.js"></script>
-  //<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.5/mode/javascript/javascript.js"></script>
+  // const q = 'UPDATE objects SET data = $1 WHERE id = $2';
+  // const p = [JSON.stringify({ name: 'std'}), '01JPDPBQ2R5FSAYD1PWYCTK4PD'];
+  // console.log(await db.query(q, p))
 
-  //console.log(CodeMirror)
+  let q = 'UPDATE objects SET next_id = $1 WHERE id = $2';
+  let p = ['01JP22650SMSN9MV9DJ5D9J7YT', '01JF0KTTCS21CHV5CDJHA6VYX5'];
+  //console.log(await db.query(q, p))
 
-  //var editor = CodeMirror.fromTextArea(document.getElementById("code"), {
-  //  lineNumbers: true,      // отображение номеров строк
-  //  mode: "javascript",     // режим подсветки синтаксиса для JavaScript
-   // theme: "dracula"        // тема оформления (если подключена)
-  //});
+  q = 'UPDATE objects SET parent_id = $1 WHERE id = $2';
+  p = ['01JPDPBQ2R5FSAYD1PWYCTK4PD', '01JAB77AXR7SR4HEYVF7RHJ1FE'];
+  //console.log(await db.query(q, p))
+
+  //const q = 'INSERT INTO objects (id, data) VALUES ($1, $2)';
+  //const params = ['01JPDPBQ2R5FSAYD1PWYCTK4PD', JSON.stringify({ name: 'std' })];
+  //console.log(await db.query(q, params))
+
+  // const { ulid } = await import('https://cdn.jsdelivr.net/npm/ulid@2.3.0/dist/index.js');
+  // const id = ulid();
+  // console.log(id);
+
+  //console.log( (await db.query('SELECT * FROM objects')).rows )
 
   const head = document.getElementsByTagName('head')[0]
   const fontUrl = 'https://fonts.googleapis.com/css2?family';
@@ -108,13 +186,18 @@ const runFrontend = async (x) => {
   script.setAttribute('src', 'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/lib/codemirror.js')
   scripts[0].after(script)
   script.addEventListener('load', function() {
-    //console.log(CodeMirror)
+    //  const editor = CodeMirror.fromTextArea(document.getElementById("code"), {
+    //  lineNumbers: true,      // отображение номеров строк
+    //  mode: "javascript",     // режим подсветки синтаксиса для JavaScript
+    // theme: "dracula"        // тема оформления (если подключена)
+    //});
   })
 
   let script2 = document.createElement('script')
   script2.setAttribute('src', 'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/mode/javascript/javascript.js')
   script.after(script)
 }
+
 const runBackend = async (x) => {
 
   x.s('set', async (x) => {
@@ -128,8 +211,8 @@ const runBackend = async (x) => {
     let { project = 'std', get, getAll } = x
     const path = `project/${project}`
 
-    if (getAll) return await x.p('state', { auth, path, getAll })
-    if (get) return await x.p('state', { auth, path, get })
+    if (getAll) return await x.p('state', { path, getAll })
+    if (get) return await x.p('state', { path, get })
   })
   x.s('state', async (x) => {
     const { path } = x
@@ -216,6 +299,7 @@ const runBackend = async (x) => {
   })
 
   await x.s('getHtml', async (x) => {
+    //${Date.now()}
     return {
       v: `
   <!DOCTYPE html><html>
@@ -223,7 +307,7 @@ const runBackend = async (x) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   </head>
-  <body><script type="module" src="/index.js?${Date.now()}"></script></body></html>
+  <body><script type="module" src="/index.js"></script></body></html>
       `,
       isHtml: true,
     }
