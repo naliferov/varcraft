@@ -60,6 +60,9 @@ const runFrontend = async (x) => {
       .tab.active {
         background: #FFFFFF;
       }
+      .tab-view.hidden {
+        display: none;
+      }
     `
 
     const tabsPanel = mk('tabs-panel', shadow)
@@ -74,7 +77,10 @@ const runFrontend = async (x) => {
     let activeTab
 
     const openTab = (object) => {
-      if (activeTab) activeTab.className = 'tab'
+      if (activeTab) {
+        activeTab.tab.className = 'tab'
+        activeTab.tabView.classList.add('hidden')
+      }
 
       const tab = mk(object.id, tabsPanel)
       tab.className = 'tab active'
@@ -83,12 +89,11 @@ const runFrontend = async (x) => {
         activateTab(tab)
       })
 
-      activeTab = tab
+      const tabView = mk(null, tabsViewContainer) 
+      tabView.className = 'tab-view'
+      tabView.innerText = object.data.code
 
-      //const tabContent = mk(null, tabContainer)    
-      // tabContent.id = name
-      // tabContent.innerText = name
-      // tabContainer.append(tabContent)
+      activeTab = { tab, tabView }
     }
     const activateTab = (tab) => {
       if (activeTab) activeTab.className = 'tab'
@@ -103,9 +108,8 @@ const runFrontend = async (x) => {
   }
 
   const tabManager = CreateTabManager(mainContainer)
-  //tabManager.openTab({ id: 'main', data: { code: 'console.log("hello")' } })
+  tabManager.openTab({ id: 'main', data: { code: 'console.log("hello")' } })
   //tabManager.openTab({ id: 'test script', data: { code: 'console.log("test script")' } })
-
   
   const { rows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
   const mainObject = rows[0]
