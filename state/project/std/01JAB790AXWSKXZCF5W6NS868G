@@ -1,1 +1,0 @@
-{"code":"const { x, o, dom } = $\n\nawait x.s(o.name, async (x) => {\n    const { dom } = x\n\n    const header = document.createElement('div')\n    dom.prepend(header)\n    return header\n})\n\nawait x.p('stdObjectControls', { target: dom, o })","id":"01JAB790AXWSKXZCF5W6NS868G","name":"addHeader"}

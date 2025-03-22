@@ -1,1 +1,0 @@
-{"id":"01JF0DMVY1FHFEENHT3FJE87E6","code":"const { x, o, dom } = $\n\n//\n\nawait x.p('stdObjectControls', { target: dom, o })","name":"account"}
