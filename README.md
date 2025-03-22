@@ -1,5 +1,4 @@
 # varcraft
 🧙‍♂️ Javascript sandbox
 
-Editor of Users, projects,
-Editor of code objects
+Edit objects with code and run it
