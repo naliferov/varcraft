@@ -1,5 +1,7 @@
 const runFrontend = async (x) => {
 
+  document.body.style.margin = 0
+
   const insertTxtAtCursor = (txt) => {
     const selection = window.getSelection()
     if (!selection.rangeCount) return
@@ -19,64 +21,92 @@ const runFrontend = async (x) => {
   const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
   const db = new PGlite('idb://my-pgdata')
 
-  const app = document.createElement('div')
-  app.id = 'app'
-  document.body.append(app)
+  const mk = (id, target, tag = 'div') => {
+    const el = document.createElement(tag)
+    if (id) el.id = id
+    target.append(el)
+    return el
+  }
 
-  const objectBrowser = document.createElement('div')
-  objectBrowser.id = 'object-browser'
-  app.append(objectBrowser)
+  const app = mk('app', document.body)
+  app.style.display = 'flex'
+  app.style.alignItems = 'flex-start'
 
-  const mainContainer = document.createElement('div')
-  mainContainer.id = 'main-container'
-  app.append(mainContainer)
+  const objectBrowserWidth = 250
 
-  const tabsAPIFactory = (target) => {
-    const tabsPanel = document.createElement('div')
-    tabsPanel.id = 'tabs-panel'
-    target.append(tabsPanel)
-    
-    const tabContainer = document.createElement('div')
-    tabContainer.className = 'tab-container'
-    target.append(tabContainer)
+  const objectBrowser = mk('object-browser', app)
+  objectBrowser.style.padding = '8px'
+  objectBrowser.style.width = objectBrowserWidth + 'px'
+  objectBrowser.style.height = window.innerHeight + 'px'
+  objectBrowser.style.background = '#F3F3F3'
 
-    const objectCode = document.createElement('div')
-    objectCode.className = 'object-code'
-    tabContainer.append(objectCode)
+  const mainContainer = mk('main-container', app)
+  mainContainer.style.width = `calc(100% - ${objectBrowserWidth}px)`
 
-    const objectView = document.createElement('div')
-    objectView.className = 'object-view'
-    tabContainer.append(objectView)
-  
-    const createTab = (name) => {
-      const tab = document.createElement('div')
-      tab.id = name
-      tab.innerText = name
-      tabsPanel.append(tab)
-    }
-    const openTab = (id) => {
-      console.log('openTab', id)
-      // const tab = document.createElement('div')
-      // tab.id = name
-      // tab.innerText = name
-      // tabsPanel.append(tab)
+  const CreateTabManager = (target) => {
 
-      // const tabContent = document.createElement('div')
+    const tabsView = mk('tabs-view', target)
+    const shadow = tabsView.attachShadow({ mode: 'open' })
+    const style = mk(null, shadow, 'style')
+    style.innerHTML = `
+      #tabs-panel {
+        display: flex;
+        background: #F3F3F3;
+      }
+      .tab {
+        padding: 8px;
+        cursor: pointer;
+      }
+      .tab.active {
+        background: #FFFFFF;
+      }
+    `
+
+    const tabsPanel = mk('tabs-panel', shadow)
+    tabsPanel.style.width = '100%'
+    tabsPanel.style.height = '35px'
+
+    const tabsViewContainer = mk('tab-container', shadow)
+
+    const objectCode = mk('object-code', tabsViewContainer)
+    const objectView = mk('object-view', tabsViewContainer)
+
+    let activeTab
+
+    const openTab = (object) => {
+      if (activeTab) activeTab.className = 'tab'
+
+      const tab = mk(object.id, tabsPanel)
+      tab.className = 'tab active'
+      tab.innerText = object.id
+      tab.addEventListener('click', () => {
+        activateTab(tab)
+      })
+
+      activeTab = tab
+
+      //const tabContent = mk(null, tabContainer)    
       // tabContent.id = name
       // tabContent.innerText = name
       // tabContainer.append(tabContent)
     }
+    const activateTab = (tab) => {
+      if (activeTab) activeTab.className = 'tab'
+      tab.className = 'tab active'
+      activeTab = tab
+    }
 
     return {
-      createTab,
       openTab,
+      activateTab,
     }
   }
 
-  const tabsAPI = tabsAPIFactory(mainContainer)
+  const tabManager = CreateTabManager(mainContainer)
+  //tabManager.openTab({ id: 'main', data: { code: 'console.log("hello")' } })
+  //tabManager.openTab({ id: 'test script', data: { code: 'console.log("test script")' } })
 
   
-
   const { rows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
   const mainObject = rows[0]
   if (!mainObject) {
@@ -96,7 +126,7 @@ const runFrontend = async (x) => {
     name.innerText = 'main'
     name.style.fontWeight = 'bold'
     name.addEventListener('click', () => {
-      tabsAPI.openTab('main')
+      tabManager.openTab(object)
     })
     dom.append(name)
 
