@@ -37,16 +37,16 @@ const runFrontend = async (x) => {
   const objectBrowser = mk('object-browser', app)
   objectBrowser.style.padding = '8px'
   objectBrowser.style.width = objectBrowserWidth + 'px'
-  objectBrowser.style.height = window.innerHeight + 'px'
+  objectBrowser.style.height = (window.innerHeight - 16) + 'px' //minus padding
   objectBrowser.style.background = '#F3F3F3'
 
   const mainContainer = mk('main-container', app)
   mainContainer.style.width = `calc(100% - ${objectBrowserWidth}px)`
 
-  const CreateTabManager = (target) => {
-
-    const tabsView = mk('tabs-view', target)
-    const shadow = tabsView.attachShadow({ mode: 'open' })
+  const CreateTabManager =  (target) => {
+        
+    const tabsMainContainer = mk('tabs-main-container', target)
+    const shadow = tabsMainContainer.attachShadow({ mode: 'open' })
     const style = mk(null, shadow, 'style')
     style.innerHTML = `
       #tabs-panel {
@@ -66,39 +66,71 @@ const runFrontend = async (x) => {
     `
 
     const tabsPanel = mk('tabs-panel', shadow)
-    tabsPanel.style.width = '100%'
-    tabsPanel.style.height = '35px'
+    const tabsView = mk('tabs-view', shadow)
 
-    const tabsViewContainer = mk('tab-container', shadow)
-
-    const objectCode = mk('object-code', tabsViewContainer)
-    const objectView = mk('object-view', tabsViewContainer)
+    tabsView.style.height = window.innerHeight + 'px' //improve 
+    tabsView.style.overflow = 'scroll'
 
     let activeTab
 
-    const openTab = (object) => {
-      if (activeTab) {
-        activeTab.tab.className = 'tab'
-        activeTab.tabView.classList.add('hidden')
-      }
+    const openObject = (object) => {}
+    const openObjectWithObject = (object, otherObject) => {}
 
+    const openTab = (object) => {
       const tab = mk(object.id, tabsPanel)
       tab.className = 'tab active'
       tab.innerText = object.id
-      tab.addEventListener('click', () => {
-        activateTab(tab)
+
+      const tabView = mk(null, tabsView)
+      tabView.className = 'tab-view'
+      tabView.style.padding = '8px'
+      
+      const pre = mk(null, tabView, 'pre')
+      pre.className = 'object-code'
+      pre.style.margin = 0
+      pre.setAttribute('contenteditable', 'plaintext-only')
+      pre.setAttribute('object-id', object.id)
+      pre.innerText = object.data.code
+      
+      pre.addEventListener('keydown', (e) => {
+        if (e.key !== 'Tab') return
+        e.preventDefault()
+        insertTxtAtCursor('    ')
+      })
+      pre.addEventListener('input', async () => {
+        object.data.code = pre.innerText
+        console.log(object.data.code)
+        //await db.query(
+        //  `UPDATE objects SET data = $1 WHERE id = $2`,
+        //  [JSON.stringify(object.data), 'main']
+        //);
       })
 
-      const tabView = mk(null, tabsViewContainer) 
-      tabView.className = 'tab-view'
-      tabView.innerText = object.data.code
 
-      activeTab = { tab, tabView }
+
+      const uiContainer = mk(null, tabView) 
+      uiContainer.className = 'dom-container'
+      uiContainer.style.padding = '8px'
+
+      const tabForActivate = { tab, tabView }
+
+      activateTab(tabForActivate)
+      tab.addEventListener('click', () => {
+        activateTab(tabForActivate)
+      })
     }
-    const activateTab = (tab) => {
-      if (activeTab) activeTab.className = 'tab'
-      tab.className = 'tab active'
-      activeTab = tab
+    const activateTab = (tabForActivate) => {
+
+      if (activeTab) {
+        const { tab, tabView } = activeTab
+        tab.classList.remove('active')
+        tabView.classList.add('hidden')
+      }
+
+      const { tab, tabView } = tabForActivate
+      tab.classList.add('active')
+      tabView.classList.remove('hidden')
+      activeTab = tabForActivate
     }
 
     return {
@@ -109,7 +141,7 @@ const runFrontend = async (x) => {
 
   const tabManager = CreateTabManager(mainContainer)
   tabManager.openTab({ id: 'main', data: { code: 'console.log("hello")' } })
-  //tabManager.openTab({ id: 'test script', data: { code: 'console.log("test script")' } })
+  tabManager.openTab({ id: 'test script', data: { code: 'console.log("test script")' } })
   
   const { rows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
   const mainObject = rows[0]
@@ -129,28 +161,31 @@ const runFrontend = async (x) => {
     const name = document.createElement('div')
     name.innerText = 'main'
     name.style.fontWeight = 'bold'
-    name.addEventListener('click', () => {
+    name.addEventListener('click', (e) => {
       tabManager.openTab(object)
+    })
+    name.addEventListener('contextmenu', (e) => {
+      console.log('contextmenu')
     })
     dom.append(name)
 
-    const pre = document.createElement('pre')
-    pre.className = 'object-code'
-    pre.setAttribute('contenteditable', 'plaintext-only')
-    pre.setAttribute('object-id', object.id)
-    pre.innerText = object.data.code
-    pre.addEventListener('keydown', (e) => {
-      if (e.key !== 'Tab') return
-      e.preventDefault()
-      insertTxtAtCursor('    ')
-    })
-    pre.addEventListener('input', async () => {
-      object.data.code = pre.innerText
-      await db.query(
-        `UPDATE objects SET data = $1 WHERE id = $2`,
-        [JSON.stringify(object.data), 'main']
-      );
-    })
+    // const pre = document.createElement('pre')
+    // pre.className = 'object-code'
+    // pre.setAttribute('contenteditable', 'plaintext-only')
+    // pre.setAttribute('object-id', object.id)
+    // pre.innerText = object.data.code
+    // pre.addEventListener('keydown', (e) => {
+    //   if (e.key !== 'Tab') return
+    //   e.preventDefault()
+    //   insertTxtAtCursor('    ')
+    // })
+    // pre.addEventListener('input', async () => {
+    //   object.data.code = pre.innerText
+    //   await db.query(
+    //     `UPDATE objects SET data = $1 WHERE id = $2`,
+    //     [JSON.stringify(object.data), 'main']
+    //   );
+    // })
     //dom.append(pre)
 
     const code = `export default async ($) => { ${object.data.code} }`
