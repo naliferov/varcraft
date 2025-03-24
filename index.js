@@ -43,7 +43,23 @@ const runFrontend = async (x) => {
   const mainContainer = mk('main-container', app)
   mainContainer.style.width = `calc(100% - ${objectBrowserWidth}px)`
 
-  const CreateTabManager =  (target) => {
+  //todo create ObjectManager and it will be facade for open close objects
+  const ObjectManager = () => {
+    const openObject = (obj) => {
+      tabManager.openTab(obj)
+      openedObjects[obj.id] = 1
+    }
+    const closeObject = (obj) => {
+      tabManager.closeTab(obj)
+      //delete openedObjects[obj.id]
+    }
+    return {
+      openObject,
+      closeObject,
+    }
+  }
+
+  const CreateTabManager = (target) => {
         
     const tabsMainContainer = mk('tabs-main-container', target)
     const shadow = tabsMainContainer.attachShadow({ mode: 'open' })
@@ -97,29 +113,29 @@ const runFrontend = async (x) => {
         e.preventDefault()
         insertTxtAtCursor('    ')
       })
-      pre.addEventListener('input', async () => {
-        object.data.code = pre.innerText
-        console.log(object.data.code)
-        //await db.query(
-        //  `UPDATE objects SET data = $1 WHERE id = $2`,
-        //  [JSON.stringify(object.data), 'main']
-        //);
-      })
-
-
+      if (object.id && object.id.trim() === 'main') {
+        pre.addEventListener('input', async () => {
+          object.data.code = pre.innerText
+          await db.query(
+           `UPDATE objects SET data = $1 WHERE id = $2`,
+           [JSON.stringify(object.data), 'main']
+          );
+        })
+      }
 
       const uiContainer = mk(null, tabView) 
       uiContainer.className = 'dom-container'
       uiContainer.style.padding = '8px'
 
-      const tabForActivate = { tab, tabView }
+      const tabForActivation = { tab, tabView }
+      activateTab(tabForActivation)
 
-      activateTab(tabForActivate)
       tab.addEventListener('click', () => {
-        activateTab(tabForActivate)
+        activateTab(tabForActivation)
       })
     }
-    const activateTab = (tabForActivate) => {
+    const closeTab = (tab) => {}
+    const activateTab = (tabForActivation) => {
 
       if (activeTab) {
         const { tab, tabView } = activeTab
@@ -127,66 +143,53 @@ const runFrontend = async (x) => {
         tabView.classList.add('hidden')
       }
 
-      const { tab, tabView } = tabForActivate
+      const { tab, tabView } = tabForActivation
       tab.classList.add('active')
       tabView.classList.remove('hidden')
-      activeTab = tabForActivate
+      activeTab = tabForActivation
     }
 
     return {
       openTab,
-      activateTab,
+      openObject,
+      openObjectWithObject,
     }
   }
 
   const tabManager = CreateTabManager(mainContainer)
-  tabManager.openTab({ id: 'main', data: { code: 'console.log("hello")' } })
-  tabManager.openTab({ id: 'test script', data: { code: 'console.log("test script")' } })
-  
-  const { rows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
-  const mainObject = rows[0]
+
+  // if (Object.keys(openedObjects).length > 0) {
+  //   const openedObjectsData = await db.query(`SELECT * FROM objects WHERE id = ANY($1)`, [Object.keys(openedObjects)])
+  //   console.log('openedObjectsData', openedObjectsData)
+  // }
+
+  //todo get all objects in one query
+  const { rows: objectsRows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
+  const mainObject = objectsRows[0]
   if (!mainObject) {
     console.log('need to import std data backup from backend')
     return
   }
 
-  const renderMainObject = async (x) => {
+  const runMainObject = async (x) => {
     const { target, object, db } = x
 
-    const dom = document.createElement('div')
-    dom.id = object.id
+    const dom = mk(object.id, target)
     dom.className = 'object'
-    target.append(dom)
 
-    const name = document.createElement('div')
+    const name = mk(null, dom)
     name.innerText = 'main'
     name.style.fontWeight = 'bold'
-    name.addEventListener('click', (e) => {
+    name.addEventListener('click', async (e) => {
       tabManager.openTab(object)
+      openedObjects[object.id] = 1
+      await db.query(
+        `INSERT INTO kv (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        ['openedObjects', JSON.stringify(openedObjects)]
+      );
     })
-    name.addEventListener('contextmenu', (e) => {
-      console.log('contextmenu')
-    })
-    dom.append(name)
-
-    // const pre = document.createElement('pre')
-    // pre.className = 'object-code'
-    // pre.setAttribute('contenteditable', 'plaintext-only')
-    // pre.setAttribute('object-id', object.id)
-    // pre.innerText = object.data.code
-    // pre.addEventListener('keydown', (e) => {
-    //   if (e.key !== 'Tab') return
-    //   e.preventDefault()
-    //   insertTxtAtCursor('    ')
-    // })
-    // pre.addEventListener('input', async () => {
-    //   object.data.code = pre.innerText
-    //   await db.query(
-    //     `UPDATE objects SET data = $1 WHERE id = $2`,
-    //     [JSON.stringify(object.data), 'main']
-    //   );
-    // })
-    //dom.append(pre)
+    name.addEventListener('contextmenu', (e) => console.log('contextmenu'))
 
     const code = `export default async ($) => { ${object.data.code} }`
     const blob = new Blob([code], { type: 'application/javascript' })
@@ -197,7 +200,23 @@ const runFrontend = async (x) => {
       console.error(e)
     }
   }
-  await renderMainObject({ x, target: objectBrowser, object: mainObject, db })
+  await runMainObject({ x, target: objectBrowser, object: mainObject, db })
+
+  // run this code in mainObject code, and add ability to edit it in safe mode
+  let openedObjects = {}
+  {
+    const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
+    if (rows.length > 0) {
+      const [ { value } ] = rows
+      openedObjects = JSON.parse(value)
+    }
+  }
+  //run loop for openedObjects and tabManager.openTab for each object
+  for (const objectId in openedObjects) {
+    if (objectId.trim() === 'main') {
+      tabManager.openTab(mainObject)
+    }
+  }
 
   //delete mainObject.data.id
   //mainObject.data.code = mainObject.data.code.replace('const dump = ', '//const dump = ')
