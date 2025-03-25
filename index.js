@@ -33,15 +33,16 @@ const runFrontend = async (x) => {
   app.style.alignItems = 'flex-start'
 
   const objectBrowserWidth = 250
+  const objectBrowserPadding = 8
 
   const objectBrowser = mk('object-browser', app)
-  objectBrowser.style.padding = '8px'
+  objectBrowser.style.padding = objectBrowserPadding + 'px'
   objectBrowser.style.width = objectBrowserWidth + 'px'
   objectBrowser.style.height = (window.innerHeight - 16) + 'px' //minus padding
   objectBrowser.style.background = '#F3F3F3'
 
   const mainContainer = mk('main-container', app)
-  mainContainer.style.width = `calc(100% - ${objectBrowserWidth}px)`
+  mainContainer.style.width = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
 
   //todo create ObjectManager and it will be facade for open close objects
   const ObjectManager = () => {
@@ -70,6 +71,8 @@ const runFrontend = async (x) => {
         background: #F3F3F3;
       }
       .tab {
+        display: flex;
+        align-items: center;
         padding: 8px;
         cursor: pointer;
       }
@@ -78,6 +81,14 @@ const runFrontend = async (x) => {
       }
       .tab-view.hidden {
         display: none;
+      }
+      .object-code {
+        font-family: 'JetBrains Mono', monospace;
+      }
+      #close-tab-btn {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
       }
     `
 
@@ -93,9 +104,23 @@ const runFrontend = async (x) => {
     const openObjectWithObject = (object, otherObject) => {}
 
     const openTab = (object) => {
-      const tab = mk(object.id, tabsPanel)
+      const tab = mk(null, tabsPanel)
       tab.className = 'tab active'
-      tab.innerText = object.id
+
+      const name = mk(null, tab)
+      name.className = 'tab-name'
+      name.innerText = object.id //todo in future it will be object name
+      name.style.marginRight = '3px'
+      
+      const closeTabBtn = mk('close-tab-btn', tab)
+      closeTabBtn.addEventListener('click', () => {
+        closeTab({ tab, tabView })
+      })
+      closeTabBtn.innerHTML += `
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"></path>
+        </svg>
+      `
 
       const tabView = mk(null, tabsView)
       tabView.className = 'tab-view'
@@ -107,7 +132,6 @@ const runFrontend = async (x) => {
       pre.setAttribute('contenteditable', 'plaintext-only')
       pre.setAttribute('object-id', object.id)
       pre.innerText = object.data.code
-      
       pre.addEventListener('keydown', (e) => {
         if (e.key !== 'Tab') return
         e.preventDefault()
@@ -123,9 +147,9 @@ const runFrontend = async (x) => {
         })
       }
 
-      const uiContainer = mk(null, tabView) 
-      uiContainer.className = 'dom-container'
-      uiContainer.style.padding = '8px'
+      // const uiContainer = mk(null, tabView) 
+      // uiContainer.className = 'dom-container'
+      // uiContainer.style.padding = '8px'
 
       const tabForActivation = { tab, tabView }
       activateTab(tabForActivation)
@@ -134,7 +158,11 @@ const runFrontend = async (x) => {
         activateTab(tabForActivation)
       })
     }
-    const closeTab = (tab) => {}
+    const closeTab = (tabForDeactivation) => {
+      const { tab, tabView } = tabForDeactivation
+      tab.remove()
+      tabView.remove()
+    }
     const activateTab = (tabForActivation) => {
 
       if (activeTab) {
@@ -218,34 +246,6 @@ const runFrontend = async (x) => {
     }
   }
 
-  //delete mainObject.data.id
-  //mainObject.data.code = mainObject.data.code.replace('const dump = ', '//const dump = ')
-  //const pre = document.createElement('pre')
-  //pre.innerText = mainObject.data.code
-  //app.append(pre)
-
-  // const q = 'UPDATE objects SET data = $1 WHERE id = $2';
-  // const p = [JSON.stringify({ name: 'std'}), '01JPDPBQ2R5FSAYD1PWYCTK4PD'];
-  // console.log(await db.query(q, p))
-
-  let q = 'UPDATE objects SET next_id = $1 WHERE id = $2';
-  let p = ['01JP22650SMSN9MV9DJ5D9J7YT', '01JF0KTTCS21CHV5CDJHA6VYX5'];
-  //console.log(await db.query(q, p))
-
-  q = 'UPDATE objects SET parent_id = $1 WHERE id = $2';
-  p = ['01JPDPBQ2R5FSAYD1PWYCTK4PD', '01JAB77AXR7SR4HEYVF7RHJ1FE'];
-  //console.log(await db.query(q, p))
-
-  //const q = 'INSERT INTO objects (id, data) VALUES ($1, $2)';
-  //const params = ['01JPDPBQ2R5FSAYD1PWYCTK4PD', JSON.stringify({ name: 'std' })];
-  //console.log(await db.query(q, params))
-
-  // const { ulid } = await import('https://cdn.jsdelivr.net/npm/ulid@2.3.0/dist/index.js');
-  // const id = ulid();
-  // console.log(id);
-
-  //console.log( (await db.query('SELECT * FROM objects')).rows )
-
   const head = document.getElementsByTagName('head')[0]
   const fontUrl = 'https://fonts.googleapis.com/css2?family';
   [
@@ -287,50 +287,8 @@ const runFrontend = async (x) => {
 }
 
 const runBackend = async (x) => {
-
-  x.s('set', async (x) => {
-    const { project = 'std', id, data } = x
-    const path = `project/${project}/${id}`
-
-    await x.p('state', { path, set: { data } })
-    return { id, data }
-  })
-  x.s('get', async (x) => {
-    let { project = 'std', get, getAll } = x
-    const path = `project/${project}`
-
-    if (getAll) return await x.p('state', { path, getAll })
-    if (get) return await x.p('state', { path, get })
-  })
-  x.s('state', async (x) => {
-    const { path } = x
-    const statePath = `state/${path}`
-
-    if (x.set) return await x.p('fs', { set: { path: statePath, data: x.set.data } })
-    if (x.get) {
-      const { id } = x.get
-      const path = `${statePath}/${id}`
-      const object = await x.p('fs', { get: { path } })
-      if (object) return { object : object.toString() } //in case id.bin don't make toString
-    }
-    if (x.getAll) {
-      const list = await x.p('fs', { readdir: { path: statePath } })
-      const r = []
-      for (let i of list) {
-        const str = await x.p('fs', { get: { path: `${statePath}/${i}` } })
-        r.push(str.toString())
-      }
-      return r
-    }
-    if (x.del) {
-      //const { id } = x.del
-      //const path = `${statePath}/${id}`
-      //return x.p('fs', { del: { path } })
-    }
-  })
   x.s('fs', async (x) => {
     const { promises: fs } = await import('node:fs')
-
     try {
       if (x.set) return await fs.writeFile(x.set.path, x.set.data)
       else if (x.get) return await fs.readFile(x.get.path)
@@ -344,7 +302,6 @@ const runBackend = async (x) => {
     const { ctx } = x
     const pathname = ctx.url.pathname
     if (pathname === '/favicon.ico') return { fileNotFound: true }
-    //todo block direct request to state dir
 
     let ext, mime
     const split = pathname.split('/').pop().split('.')
@@ -390,12 +347,14 @@ const runBackend = async (x) => {
     //${Date.now()}
     return {
       v: `
-  <!DOCTYPE html><html>
+  <!DOCTYPE html>
+  <html>
   <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   </head>
-  <body><script type="module" src="/index.js"></script></body></html>
+  <body><script type="module" src="/index.js"></script></body>
+  </html>
       `,
       isHtml: true,
     }
@@ -448,16 +407,16 @@ const runBackend = async (x) => {
   })
 
   await x.s('httpHandler', async (x) => {
-    const { rq, fs } = x
+    const { rq } = x
     const ctx = {
-      rq,
-      headers: rq.headers,
       url: new URL('http://t.c' + rq.url),
       query: {},
+      rq,
+      headers: rq.headers,
     }
     ctx.url.searchParams.forEach((v, k) => (ctx.query[k] = v))
-    const r = await x.p('httpGetFile', { ctx, fs })
 
+    const r = await x.p('httpGetFile', { ctx })
     if (r.fileNotFound) return await x.p('httpMkResp', { code: 404, v: 'File not found' })
     else if (r.file) return await x.p('httpMkResp', { v: r.file, mime: r.mime, isBin: true })
 
@@ -465,24 +424,26 @@ const runBackend = async (x) => {
     if (!msg) msg = {}
     if (msg.err) return await x.p('httpMkResp', { v: msg.err })
 
-    // if (msg.bin && msg.binMeta) {
-    //   msg.event = msg.binMeta.event
-    //   msg.data = { ...msg.binMeta, v: msg.bin }
-    // }
+    if (msg.bin && msg.binMeta) {
+      msg.event = msg.binMeta.event
+      msg.data = { ...msg.binMeta, v: msg.bin }
+    }
 
-    if (Object.keys(msg).length < 1) msg.event = 'getHtml'
+    if (Object.keys(msg).length < 1) {
+      msg.event = 'getHtml'
+    }
 
     const o = await x.p(msg.event, msg.data)
     if (!o) {
       return await x.p('httpMkResp', { v: { defaultResponse: true } })
     }
     if (o.isHtml) {
-      return await x.p('httpMkResp', { v: o.v, isBin: true, mime: 'text/html' })
+      return await x.p('httpMkResp', { v: o.v, mime: 'text/html' })
     }
     return await x.p('httpMkResp', { v: o })
   })
 
-  await x.s('serverStart', async (x) => {
+  {
     const server = (await import('node:http')).createServer({ requestTimeout: 30000 })
     const ctx = { filename: process.argv[1].split('/').at(-1) }
     const port = process.env.PORT || 3000
@@ -490,7 +451,7 @@ const runBackend = async (x) => {
     server.on('request', async (rq, rs) => {
       rq.on('error', (e) => {
         rq.destroy()
-        console.log('request no error', e)
+        console.log('request on error', e)
       })
       try {
         const r = await x.p('httpHandler', { runtimeCtx: ctx, rq })
@@ -498,18 +459,12 @@ const runBackend = async (x) => {
       } catch (e) {
         const m = 'err in rqHandler'
         console.log(m, e)
-        rs.writeHead(503, {
-          'content-type': 'text/plain; charset=utf-8',
-        }).end(m)
+        rs.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' }).end(m)
       }
     })
-    server.listen(port, () =>
-      console.log(`server start on port: [${port}]`)
-    )
-  })
-  await x.p('serverStart')
+    server.listen(port, () => console.log(`server start on port: [${port}]`))
+  }
 }
-
 
 const createDataProxy = (data, x) =>
   new Proxy(() => {}, {
