@@ -34,7 +34,6 @@ const runFrontend = async (x) => {
 
   const objectBrowserWidth = 250
   const objectBrowserPadding = 8
-
   const objectBrowser = mk('object-browser', app)
   objectBrowser.style.padding = objectBrowserPadding + 'px'
   objectBrowser.style.width = objectBrowserWidth + 'px'
@@ -44,21 +43,14 @@ const runFrontend = async (x) => {
   const mainContainer = mk('main-container', app)
   mainContainer.style.width = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
 
-  //todo create ObjectManager and it will be facade for open close objects
-  const ObjectManager = () => {
-    const openObject = (obj) => {
-      tabManager.openTab(obj)
-      openedObjects[obj.id] = 1
-    }
-    const closeObject = (obj) => {
-      tabManager.closeTab(obj)
-      //delete openedObjects[obj.id]
-    }
-    return {
-      openObject,
-      closeObject,
-    }
+  let openedObjects = {}
+  //todo it will be facade for open close objects
+  const ObjectViewManager = () => {
+    const openObject = (obj) => {}
+    const closeObject = (obj) => {}
   }
+   //const openObject = (object) => {}
+   //const openObjectWithObject = (object, otherObject) => {}
 
   const CreateTabManager = (target) => {
         
@@ -100,9 +92,6 @@ const runFrontend = async (x) => {
 
     let activeTab
 
-    const openObject = (object) => {}
-    const openObjectWithObject = (object, otherObject) => {}
-
     const openTab = (object) => {
       const tab = mk(null, tabsPanel)
       tab.className = 'tab active'
@@ -115,6 +104,12 @@ const runFrontend = async (x) => {
       const closeTabBtn = mk('close-tab-btn', tab)
       closeTabBtn.addEventListener('click', () => {
         closeTab({ tab, tabView })
+        delete openedObjects[object.id]
+        db.query(
+          `INSERT INTO kv (key, value) VALUES ($1, $2)
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+          ['openedObjects', JSON.stringify(openedObjects)]
+        );
       })
       closeTabBtn.innerHTML += `
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
@@ -179,17 +174,10 @@ const runFrontend = async (x) => {
 
     return {
       openTab,
-      openObject,
-      openObjectWithObject,
     }
   }
 
   const tabManager = CreateTabManager(mainContainer)
-
-  // if (Object.keys(openedObjects).length > 0) {
-  //   const openedObjectsData = await db.query(`SELECT * FROM objects WHERE id = ANY($1)`, [Object.keys(openedObjects)])
-  //   console.log('openedObjectsData', openedObjectsData)
-  // }
 
   //todo get all objects in one query
   const { rows: objectsRows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
@@ -231,7 +219,6 @@ const runFrontend = async (x) => {
   await runMainObject({ x, target: objectBrowser, object: mainObject, db })
 
   // run this code in mainObject code, and add ability to edit it in safe mode
-  let openedObjects = {}
   {
     const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
     if (rows.length > 0) {
