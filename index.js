@@ -2,24 +2,20 @@ const runFrontend = async (x) => {
 
   document.body.style.margin = 0
 
-  const insertTxtAtCursor = (txt) => {
-    const selection = window.getSelection()
-    if (!selection.rangeCount) return
-
-    const range = selection.getRangeAt(0)
-    range.deleteContents()
-
-    const textNode = document.createTextNode(txt)
-    range.insertNode(textNode)
-
-    range.setStartAfter(textNode)
-    range.setEndAfter(textNode)
-    selection.removeAllRanges()
-    selection.addRange(range)
-  }
-
   const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
   const db = new PGlite('idb://my-pgdata')
+
+  const head = document.getElementsByTagName('head')[0]
+  const fontUrl = 'https://fonts.googleapis.com/css2?family';
+  [
+    `${fontUrl}=Roboto:wght@400;700&display=swap`,
+    `${fontUrl}=JetBrains+Mono:wght@400;700&display=swap`
+  ].forEach(url => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = url
+    head.appendChild(link)
+  });
 
   const mk = (id, target, tag = 'div') => {
     const el = document.createElement(tag)
@@ -52,11 +48,18 @@ const runFrontend = async (x) => {
    //const openObject = (object) => {}
    //const openObjectWithObject = (object, otherObject) => {}
 
+    const requireScript = document.createElement('script');
+    requireScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js'
+    requireScript.onload = () => {
+        require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } })
+    }
+    document.head.append(requireScript);
+
   const CreateTabManager = (target) => {
         
     const tabsMainContainer = mk('tabs-main-container', target)
-    const shadow = tabsMainContainer.attachShadow({ mode: 'open' })
-    const style = mk(null, shadow, 'style')
+    const shadow = tabsMainContainer
+    const style = mk(null, head, 'style')
     style.innerHTML = `
       #tabs-panel {
         display: flex;
@@ -119,27 +122,29 @@ const runFrontend = async (x) => {
 
       const tabView = mk(null, tabsView)
       tabView.className = 'tab-view'
-      tabView.style.padding = '8px'
-      
-      const pre = mk(null, tabView, 'pre')
+      const pre = mk(null, tabView, 'div')
+      pre.style.height = '900px'
       pre.className = 'object-code'
-      pre.style.margin = 0
-      pre.setAttribute('contenteditable', 'plaintext-only')
       pre.setAttribute('object-id', object.id)
-      pre.innerText = object.data.code
-      pre.addEventListener('keydown', (e) => {
-        if (e.key !== 'Tab') return
-        e.preventDefault()
-        insertTxtAtCursor('    ')
-      })
+
+      require(['vs/editor/editor.main'], () => {
+        monaco.editor.create(pre, {
+          value: object.data.code,
+          language: 'javascript',
+          theme: 'vs-light',
+          automaticLayout: true,
+          fontSize: 15
+        });
+      });
+
       if (object.id && object.id.trim() === 'main') {
-        pre.addEventListener('input', async () => {
-          object.data.code = pre.innerText
-          await db.query(
-           `UPDATE objects SET data = $1 WHERE id = $2`,
-           [JSON.stringify(object.data), 'main']
-          );
-        })
+        // pre.addEventListener('input', async () => {
+        //   object.data.code = pre.innerText
+        //   await db.query(
+        //    `UPDATE objects SET data = $1 WHERE id = $2`,
+        //    [JSON.stringify(object.data), 'main']
+        //   );
+        // })
       }
 
       // const uiContainer = mk(null, tabView) 
@@ -147,11 +152,11 @@ const runFrontend = async (x) => {
       // uiContainer.style.padding = '8px'
 
       const tabForActivation = { tab, tabView }
-      activateTab(tabForActivation)
-
       tab.addEventListener('click', () => {
         activateTab(tabForActivation)
       })
+      activateTab(tabForActivation)
+
     }
     const closeTab = (tabForDeactivation) => {
       const { tab, tabView } = tabForDeactivation
@@ -176,10 +181,8 @@ const runFrontend = async (x) => {
       openTab,
     }
   }
-
   const tabManager = CreateTabManager(mainContainer)
 
-  //todo get all objects in one query
   const { rows: objectsRows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
   const mainObject = objectsRows[0]
   if (!mainObject) {
@@ -187,7 +190,7 @@ const runFrontend = async (x) => {
     return
   }
 
-  const runMainObject = async (x) => {
+  const renderAndRunMainObject = async (x) => {
     const { target, object, db } = x
 
     const dom = mk(object.id, target)
@@ -216,61 +219,19 @@ const runFrontend = async (x) => {
       console.error(e)
     }
   }
-  await runMainObject({ x, target: objectBrowser, object: mainObject, db })
-
-  // run this code in mainObject code, and add ability to edit it in safe mode
+  await renderAndRunMainObject({ x, target: objectBrowser, object: mainObject, db })
   {
     const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
     if (rows.length > 0) {
       const [ { value } ] = rows
       openedObjects = JSON.parse(value)
     }
-  }
-  //run loop for openedObjects and tabManager.openTab for each object
-  for (const objectId in openedObjects) {
-    if (objectId.trim() === 'main') {
-      tabManager.openTab(mainObject)
+    for (const objectId in openedObjects) {
+      if (objectId.trim() === 'main') {
+        tabManager.openTab(mainObject)
+      }
     }
   }
-
-  const head = document.getElementsByTagName('head')[0]
-  const fontUrl = 'https://fonts.googleapis.com/css2?family';
-  [
-    `${fontUrl}=Roboto:wght@400;700&display=swap`,
-    `${fontUrl}=JetBrains+Mono:wght@400;700&display=swap`
-  ].forEach(url => {
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = url
-    head.appendChild(link)
-  });
-
-  [
-    'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/lib/codemirror.css',
-    'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/theme/dracula.css'
-  ].forEach(url => {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = url;
-    head.append(link);
-  });
-
-  const scripts = document.getElementsByTagName('script')
-  
-  let script = document.createElement('script')
-  script.setAttribute('src', 'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/lib/codemirror.js')
-  scripts[0].after(script)
-  script.addEventListener('load', function() {
-    //  const editor = CodeMirror.fromTextArea(document.getElementById("code"), {
-    //  lineNumbers: true,      // отображение номеров строк
-    //  mode: "javascript",     // режим подсветки синтаксиса для JavaScript
-    // theme: "dracula"        // тема оформления (если подключена)
-    //});
-  })
-
-  let script2 = document.createElement('script')
-  script2.setAttribute('src', 'https://cdn.jsdelivr.net/npm/codemirror@5.65.5/mode/javascript/javascript.js')
-  script.after(script)
 }
 
 const runBackend = async (x) => {
