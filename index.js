@@ -48,12 +48,15 @@ const runFrontend = async (x) => {
    //const openObject = (object) => {}
    //const openObjectWithObject = (object, otherObject) => {}
 
-    const requireScript = document.createElement('script');
-    requireScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js'
-    requireScript.onload = () => {
-        require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } })
-    }
-    document.head.append(requireScript);
+  const { promise: editorIsReady, resolve: editorIsReadyResolve } = Promise.withResolvers()
+  const requireScript = document.createElement('script');
+  requireScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js'
+  requireScript.onload = () => {
+      require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } })
+      require(['vs/editor/editor.main'], editorIsReadyResolve)
+  }
+  document.head.append(requireScript)
+  await editorIsReady
 
   const CreateTabManager = (target) => {
         
@@ -90,7 +93,7 @@ const runFrontend = async (x) => {
     const tabsPanel = mk('tabs-panel', shadow)
     const tabsView = mk('tabs-view', shadow)
 
-    tabsView.style.height = window.innerHeight + 'px' //improve 
+    tabsView.style.height = window.innerHeight + 'px' 
     tabsView.style.overflow = 'scroll'
 
     let activeTab
@@ -127,25 +130,23 @@ const runFrontend = async (x) => {
       pre.className = 'object-code'
       pre.setAttribute('object-id', object.id)
 
-      require(['vs/editor/editor.main'], () => {
-        monaco.editor.create(pre, {
-          value: object.data.code,
-          language: 'javascript',
-          theme: 'vs-light',
-          automaticLayout: true,
-          fontSize: 15
-        });
-      });
-
-      if (object.id && object.id.trim() === 'main') {
-        // pre.addEventListener('input', async () => {
-        //   object.data.code = pre.innerText
-        //   await db.query(
-        //    `UPDATE objects SET data = $1 WHERE id = $2`,
-        //    [JSON.stringify(object.data), 'main']
-        //   );
-        // })
-      }
+      const editor = monaco.editor.create(pre, {
+        value: object.data.code,
+        language: 'javascript',
+        theme: 'vs-light',
+        automaticLayout: true,
+        fontSize: 15
+      })
+      editor.onDidChangeModelContent(() => {
+        if (!object.id || object.id.trim() !== 'main') {
+          return
+        }
+        object.data.code = editor.getValue()
+        db.query(
+         `UPDATE objects SET data = $1 WHERE id = $2`,
+         [JSON.stringify(object.data), 'main']
+        )
+      })
 
       // const uiContainer = mk(null, tabView) 
       // uiContainer.className = 'dom-container'
@@ -200,6 +201,8 @@ const runFrontend = async (x) => {
     name.innerText = 'main'
     name.style.fontWeight = 'bold'
     name.addEventListener('click', async (e) => {
+      if (openedObjects[object.id]) return
+      
       tabManager.openTab(object)
       openedObjects[object.id] = 1
       await db.query(
@@ -213,7 +216,7 @@ const runFrontend = async (x) => {
     const code = `export default async ($) => { ${object.data.code} }`
     const blob = new Blob([code], { type: 'application/javascript' })
     try {
-      const m = await import(URL.createObjectURL(blob))
+      const m = (await import(URL.createObjectURL(blob)))
       m.default({ x: x.x, o: object, dom, db })
     } catch (e) {
       console.error(e)
@@ -292,7 +295,6 @@ const runBackend = async (x) => {
   })
 
   await x.s('getHtml', async (x) => {
-    //${Date.now()}
     return {
       v: `
   <!DOCTYPE html>
@@ -438,7 +440,7 @@ const psbus = () => {
   const x = {
     events: {}, //for possible events in future
     func: {},
-    
+
     async p(event, data = {}) {
       const dataObject = typeof data === 'function' ? data : createDataProxy(data, x)
 
