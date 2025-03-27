@@ -157,13 +157,14 @@ const runFrontend = async (x) => {
         activateTab(tabForActivation)
       })
       activateTab(tabForActivation)
-
     }
+
     const closeTab = (tabForDeactivation) => {
       const { tab, tabView } = tabForDeactivation
       tab.remove()
       tabView.remove()
     }
+
     const activateTab = (tabForActivation) => {
 
       if (activeTab) {
@@ -178,9 +179,7 @@ const runFrontend = async (x) => {
       activeTab = tabForActivation
     }
 
-    return {
-      openTab,
-    }
+    return { openTab }
   }
   const tabManager = CreateTabManager(mainContainer)
 
@@ -202,7 +201,7 @@ const runFrontend = async (x) => {
     name.style.fontWeight = 'bold'
     name.addEventListener('click', async (e) => {
       if (openedObjects[object.id]) return
-      
+
       tabManager.openTab(object)
       openedObjects[object.id] = 1
       await db.query(
