@@ -39,9 +39,13 @@ const runFrontend = async (x) => {
   const mainContainer = mk('main-container', app)
   mainContainer.style.width = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
 
-  let openedObjects = {}
-  //todo it will be facade for open close objects
+
   const ObjectViewManager = () => {
+    const openObject = (obj) => {}
+    const closeObject = (obj) => {}
+  }
+  //todo it will be facade for open close objects
+  const ObjectTabManager = () => {
     const openObject = (obj) => {}
     const closeObject = (obj) => {}
   }
@@ -57,6 +61,11 @@ const runFrontend = async (x) => {
   }
   document.head.append(requireScript)
   await editorIsReady
+
+
+  let openedObjects = {}
+
+  //const objectViewManager = CreateObjectViewManager(mainContainer)
 
   const CreateTabManager = (target) => {
         
@@ -113,7 +122,7 @@ const runFrontend = async (x) => {
         delete openedObjects[object.id]
         db.query(
           `INSERT INTO kv (key, value) VALUES ($1, $2)
-          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
           ['openedObjects', JSON.stringify(openedObjects)]
         );
       })
@@ -137,20 +146,27 @@ const runFrontend = async (x) => {
         automaticLayout: true,
         fontSize: 15
       })
-      editor.onDidChangeModelContent(() => {
+      const pos = openedObjects[object.id]
+      if (pos) editor.revealPositionInCenter(pos)
+
+      editor.onDidChangeModelContent((e) => {
         if (!object.id || object.id.trim() !== 'main') {
           return
         }
+        const pos = editor.getPosition()
+        openedObjects[object.id] = { lineNumber: pos.lineNumber, column: pos.column }
+        db.query(
+          `INSERT INTO kv (key, value) VALUES ($1, $2)
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+          ['openedObjects', JSON.stringify(openedObjects)]
+        );
+        
         object.data.code = editor.getValue()
         db.query(
          `UPDATE objects SET data = $1 WHERE id = $2`,
          [JSON.stringify(object.data), 'main']
         )
       })
-
-      // const uiContainer = mk(null, tabView) 
-      // uiContainer.className = 'dom-container'
-      // uiContainer.style.padding = '8px'
 
       const tabForActivation = { tab, tabView }
       tab.addEventListener('click', () => {
