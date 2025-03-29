@@ -4,9 +4,9 @@ const runFrontend = async (x) => {
 
   const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
   const db = new PGlite('idb://my-pgdata')
-
   const head = document.getElementsByTagName('head')[0]
   const fontUrl = 'https://fonts.googleapis.com/css2?family';
+
   [
     `${fontUrl}=Roboto:wght@400;700&display=swap`,
     `${fontUrl}=JetBrains+Mono:wght@400;700&display=swap`
@@ -39,18 +39,20 @@ const runFrontend = async (x) => {
   const mainContainer = mk('main-container', app)
   mainContainer.style.width = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
 
+  const objectsView = mk('objects-view', app)
+  objectsView.style.position = `absolute`
 
-  const ObjectViewManager = () => {
-    const openObject = (obj) => {}
-    const closeObject = (obj) => {}
+  const ObjectManager = {
+    openObject(object) {
+
+    },
+    openObjectWithObject(object, objectOpener) {
+
+    },
+    closeObject(object) {
+
+    },
   }
-  //todo it will be facade for open close objects
-  const ObjectTabManager = () => {
-    const openObject = (obj) => {}
-    const closeObject = (obj) => {}
-  }
-   //const openObject = (object) => {}
-   //const openObjectWithObject = (object, otherObject) => {}
 
   const { promise: editorIsReady, resolve: editorIsReadyResolve } = Promise.withResolvers()
   const requireScript = document.createElement('script');
@@ -62,10 +64,7 @@ const runFrontend = async (x) => {
   document.head.append(requireScript)
   await editorIsReady
 
-
   let openedObjects = {}
-
-  //const objectViewManager = CreateObjectViewManager(mainContainer)
 
   const CreateTabManager = (target) => {
         
@@ -147,7 +146,7 @@ const runFrontend = async (x) => {
         fontSize: 15
       })
       const pos = openedObjects[object.id]
-      if (pos) editor.revealPositionInCenter(pos)
+      if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
 
       editor.onDidChangeModelContent((e) => {
         if (!object.id || object.id.trim() !== 'main') {
@@ -199,21 +198,14 @@ const runFrontend = async (x) => {
   }
   const tabManager = CreateTabManager(mainContainer)
 
-  const { rows: objectsRows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
-  const mainObject = objectsRows[0]
-  if (!mainObject) {
-    console.log('need to import std data backup from backend')
-    return
-  }
-
-  const renderAndRunMainObject = async (x) => {
-    const { target, object, db } = x
+  const renderInObjectBrowser = (x) => {
+    const { object, target } = x
 
     const dom = mk(object.id, target)
     dom.className = 'object'
 
     const name = mk(null, dom)
-    name.innerText = 'main'
+    name.innerText = object.id
     name.style.fontWeight = 'bold'
     name.addEventListener('click', async (e) => {
       if (openedObjects[object.id]) return
@@ -226,18 +218,31 @@ const runFrontend = async (x) => {
         ['openedObjects', JSON.stringify(openedObjects)]
       );
     })
-    name.addEventListener('contextmenu', (e) => console.log('contextmenu'))
+  }
+
+  const runObject = async (x) => {
+    const { object, db } = x
 
     const code = `export default async ($) => { ${object.data.code} }`
     const blob = new Blob([code], { type: 'application/javascript' })
     try {
       const m = (await import(URL.createObjectURL(blob)))
-      m.default({ x: x.x, o: object, dom, db })
+      m.default({ x: x.x, o: object, db, runObject })
     } catch (e) {
       console.error(e)
     }
   }
-  await renderAndRunMainObject({ x, target: objectBrowser, object: mainObject, db })
+
+  const { rows: objectsRows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
+  const mainObject = objectsRows[0]
+  if (!mainObject) {
+    console.log('need to import std data backup from backend')
+    return
+  }
+
+  await renderInObjectBrowser({ x, target: objectBrowser, object: mainObject, db })
+  await runObject({ x, object: mainObject, db })
+  
   {
     const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
     if (rows.length > 0) {
@@ -264,6 +269,7 @@ const runBackend = async (x) => {
       console.log(e)
     }
   })
+
   x.s('httpGetFile', async (x) => {
     const { ctx } = x
     const pathname = ctx.url.pathname
@@ -453,7 +459,7 @@ const createDataProxy = (data, x) =>
 
 const psbus = () => {
   const x = {
-    events: {}, //for possible events in future
+    events: {},
     func: {},
 
     async p(event, data = {}) {
