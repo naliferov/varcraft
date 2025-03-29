@@ -112,7 +112,7 @@ const runFrontend = async (x) => {
 
       const name = mk(null, tab)
       name.className = 'tab-name'
-      name.innerText = object.id //todo in future it will be object name
+      name.innerText = object.data.name
       name.style.marginRight = '3px'
       
       const closeTabBtn = mk('close-tab-btn', tab)
@@ -205,7 +205,7 @@ const runFrontend = async (x) => {
     dom.className = 'object'
 
     const name = mk(null, dom)
-    name.innerText = object.id
+    name.innerText = object.data.name
     name.style.fontWeight = 'bold'
     name.addEventListener('click', async (e) => {
       if (openedObjects[object.id]) return
@@ -221,13 +221,13 @@ const runFrontend = async (x) => {
   }
 
   const runObject = async (x) => {
-    const { object, db } = x
+    const { object, db, objectBrowser } = x
 
     const code = `export default async ($) => { ${object.data.code} }`
     const blob = new Blob([code], { type: 'application/javascript' })
     try {
       const m = (await import(URL.createObjectURL(blob)))
-      m.default({ x: x.x, o: object, db, runObject })
+      m.default({ x: x.x, o: object, db, objectBrowser, runObject })
     } catch (e) {
       console.error(e)
     }
@@ -240,8 +240,8 @@ const runFrontend = async (x) => {
     return
   }
 
-  await renderInObjectBrowser({ x, target: objectBrowser, object: mainObject, db })
-  await runObject({ x, object: mainObject, db })
+  await renderInObjectBrowser({ x, target: objectBrowser, object: mainObject })
+  await runObject({ x, object: mainObject, db, objectBrowser })
   
   {
     const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
