@@ -18,5 +18,8 @@
     "sandbox"
   ],
   "author": "Nikolay Aliferov <x8core@gmail.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "http-server": "^14.1.1"
+  }
 }
