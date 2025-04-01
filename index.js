@@ -1,63 +1,23 @@
-const createDataProxy = (data, x) =>
-  new Proxy(() => {}, {
-    get(t, prop) {
-      if (prop === 'p') return (...args) => x.p(...args)
-      if (prop === 's') {
-        return (...args) => {
-          x.s(...args)
-          return x
-        }
-      }
-      if (prop === 'toJSON') return () => data
+const mk = (id, target, tag = 'div') => {
+  const el = document.createElement(tag)
+  if (id) el.id = id
+  target.append(el)
+  return el
+}
 
-      return data[prop]
-    },
-    set(t, prop, value) {
-      data[prop] = value
-      return true
-    },
-})
-
-const psbus = () => {
-  const x = {
-    events: {},
-    func: {},
-
-    async p(event, data = {}) {
-      const dataObject = typeof data === 'function' ? data : createDataProxy(data, x)
-
-      const func = this.func[event]
-      if (!func) {
-        const events = this.events
-        if (!events[event]) events[event] = []
-
-        const { promise, resolve } = Promise.withResolvers()
-        events[event].push({ data, resolve })
-
-        console.log(`deffered event [${event}]`)
-        return promise
-      }
-
-      if (typeof func !== 'function') console.log(event, func)
-      return func(dataObject)
-    },
-    async s(event, func) {
-      this.func[event] = func
-
-      const events = this.events[event]
-      if (!events) return this
-
-      console.log(`executed deffered event > [${event}]`)
-      for (const { data, resolve } of events) {
-        const response = await this.p(event, data)
-        resolve(response)
-      }
-      delete this.events[event]
-      return this
-    },
-  }
-
-  return x
+const kvRepository = {
+  db: null,
+  async getKey(key) {
+    const { rows } = await this.db.query(`SELECT * FROM kv WHERE key = $1`, [key])
+    if (rows.length > 0) {
+      const [ { value } ] = rows
+      return value
+    }
+  },
+  async setKey(key, value) {
+    await this.db.query(`INSERT INTO kv (key, value) VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value])
+  },
 }
 
 document.body.style.margin = 0
@@ -66,6 +26,16 @@ const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pgli
 const db = new PGlite('idb://my-pgdata')
 const head = document.getElementsByTagName('head')[0]
 const fontUrl = 'https://fonts.googleapis.com/css2?family';
+
+const { promise: editorIsReady, resolve: editorIsReadyResolve } = Promise.withResolvers()
+const requireScript = document.createElement('script');
+requireScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js'
+requireScript.onload = () => {
+    require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } })
+    require(['vs/editor/editor.main'], editorIsReadyResolve)
+}
+document.head.append(requireScript)
+await editorIsReady;
 
 [
   `${fontUrl}=Roboto:wght@400;700&display=swap`,
@@ -77,12 +47,44 @@ const fontUrl = 'https://fonts.googleapis.com/css2?family';
   head.appendChild(link)
 });
 
-const mk = (id, target, tag = 'div') => {
-  const el = document.createElement(tag)
-  if (id) el.id = id
-  target.append(el)
-  return el
+const objectManager = {
+  openedObjects: {},
+  setDb(db) {
+    this.db = db
+  },
+  async initOpenedObjects() {
+    const { rows } = await this.db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
+    if (rows.length > 0) {
+      const [ { value } ] = rows
+      this.openedObjects = JSON.parse(value)
+    }
+  },
+  getOpenedObjects() {
+    return this.openedObjects
+  },
+  isObjectOpened(object) {
+    return Boolean(this.openedObjects[object.id])
+  },
+  openObject(object, pos) {
+    this.openedObjects[object.id] = pos ? pos : 1
+    this.saveInDb()
+  },
+  openObjectWithObject(object, otherObject) {},
+  closeObject(object) {
+    delete this.openedObjects[object.id]
+    this.saveInDb()
+  },
+  saveInDb() {
+    this.db.query(
+      `INSERT INTO kv (key, value) VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      ['openedObjects', JSON.stringify(this.openedObjects)]
+    );
+  },
 }
+objectManager.setDb(db)
+await objectManager.initOpenedObjects()
+
 
 const app = mk('app', document.body)
 app.style.display = 'flex'
@@ -91,10 +93,17 @@ app.style.alignItems = 'flex-start'
 const objectBrowserWidth = 250
 const objectBrowserPadding = 8
 const objectBrowser = mk('object-browser', app)
-objectBrowser.style.padding = objectBrowserPadding + 'px'
 objectBrowser.style.width = objectBrowserWidth + 'px'
-objectBrowser.style.height = (window.innerHeight - 16) + 'px' //minus padding
-objectBrowser.style.background = '#F3F3F3'
+objectBrowser.style.height = window.innerHeight - objectBrowserPadding * 2 + 'px'
+objectBrowser.style.padding = objectBrowserPadding + 'px'
+
+objectBrowser.style.background = '#f3f3f3'
+objectBrowser.style.color = '#616161'
+objectBrowser.style.fontFamily = 'Roboto, monospace'
+
+const smallHeading = mk(0, objectBrowser)
+smallHeading.innerText = 'EXPLORER'
+mk(0, objectBrowser, 'br')
 
 const mainContainer = mk('main-container', app)
 mainContainer.style.width = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
@@ -102,45 +111,23 @@ mainContainer.style.width = `calc(100% - ${objectBrowserWidth + objectBrowserPad
 const objectsView = mk('objects-view', app)
 objectsView.style.position = `absolute`
 
-const ObjectManager = {
-  openObject(object) {
+const createTabManager = (target, mk, head) => {
 
-  },
-  openObjectWithObject(object, objectOpener) {
+  let activeTab
 
-  },
-  closeObject(object) {
-
-  },
-}
-
-const { promise: editorIsReady, resolve: editorIsReadyResolve } = Promise.withResolvers()
-const requireScript = document.createElement('script');
-requireScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js'
-requireScript.onload = () => {
-    require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } })
-    require(['vs/editor/editor.main'], editorIsReadyResolve)
-}
-document.head.append(requireScript)
-await editorIsReady
-
-let openedObjects = {}
-
-const CreateTabManager = (target) => {
-      
-  const tabsMainContainer = mk('tabs-main-container', target)
-  const shadow = tabsMainContainer
+  const tabsContainer = mk('tabs-container', target)
   const style = mk(null, head, 'style')
   style.innerHTML = `
     #tabs-panel {
       display: flex;
-      background: #F3F3F3;
+      background: #f3f3f3;
     }
     .tab {
       display: flex;
       align-items: center;
       padding: 8px;
       cursor: pointer;
+      background: #ececec;
     }
     .tab.active {
       background: #FFFFFF;
@@ -158,17 +145,15 @@ const CreateTabManager = (target) => {
     }
   `
 
-  const tabsPanel = mk('tabs-panel', shadow)
-  const tabsView = mk('tabs-view', shadow)
-
+  const tabsPanel = mk('tabs-panel', tabsContainer)
+  const tabsView = mk('tabs-view', tabsContainer)
   tabsView.style.height = window.innerHeight + 'px' 
   tabsView.style.overflow = 'scroll'
-
-  let activeTab
 
   const openTab = (object) => {
     const tab = mk(null, tabsPanel)
     tab.className = 'tab active'
+    tab.setAttribute('tab-object-id', object.id)
 
     const name = mk(null, tab)
     name.className = 'tab-name'
@@ -176,23 +161,43 @@ const CreateTabManager = (target) => {
     name.style.marginRight = '3px'
     
     const closeTabBtn = mk('close-tab-btn', tab)
-    closeTabBtn.addEventListener('click', () => {
+    closeTabBtn.addEventListener('click', (e) => {
+
+      e.stopPropagation()
+
+      const tabs = tabsPanel.children
+      const activeTabIndex = Array.from(tabs).indexOf(tab)
+
+      let tabForActivation
+      if (activeTabIndex > 0) {
+        const nextTab = tabs[activeTabIndex - 1]
+        const nextTabView = tabsView.querySelector(`[tab-view-object-id="${nextTab.getAttribute('tab-object-id')}"]`)
+        tabForActivation = { tab: nextTab, tabView: nextTabView }
+      } else {
+        const nextTab = tabs[activeTabIndex + 1]
+        if (nextTab) {
+          const nextTabView = tabsView.querySelector(`[tab-view-object-id="${nextTab.getAttribute('tab-object-id')}"]`)
+          tabForActivation = { tab: nextTab, tabView: nextTabView }
+        }
+      }
       closeTab({ tab, tabView })
-      delete openedObjects[object.id]
-      db.query(
-        `INSERT INTO kv (key, value) VALUES ($1, $2)
-          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        ['openedObjects', JSON.stringify(openedObjects)]
-      );
+      objectManager.closeObject(object)
+
+      if (tabForActivation) {
+        activateTab(tabForActivation)
+        //objectManager.openObject(object)
+      }
     })
     closeTabBtn.innerHTML += `
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"></path>
       </svg>
     `
-
+    
     const tabView = mk(null, tabsView)
     tabView.className = 'tab-view'
+    tabView.setAttribute('tab-view-object-id', object.id)
+
     const pre = mk(null, tabView, 'div')
     pre.style.height = '900px'
     pre.className = 'object-code'
@@ -201,7 +206,7 @@ const CreateTabManager = (target) => {
     const editor = monaco.editor.create(pre, {
       value: object.data.code,
       language: 'javascript',
-      theme: 'vs-light',
+      theme: 'vs-dark',
       automaticLayout: true,
       fontSize: 15
     })
@@ -213,12 +218,7 @@ const CreateTabManager = (target) => {
         return
       }
       const pos = editor.getPosition()
-      openedObjects[object.id] = { lineNumber: pos.lineNumber, column: pos.column }
-      db.query(
-        `INSERT INTO kv (key, value) VALUES ($1, $2)
-          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        ['openedObjects', JSON.stringify(openedObjects)]
-      );
+      objectManager.openObject(object, pos)
       
       object.data.code = editor.getValue()
       db.query(
@@ -241,7 +241,6 @@ const CreateTabManager = (target) => {
   }
 
   const activateTab = (tabForActivation) => {
-
     if (activeTab) {
       const { tab, tabView } = activeTab
       tab.classList.remove('active')
@@ -249,6 +248,7 @@ const CreateTabManager = (target) => {
     }
 
     const { tab, tabView } = tabForActivation
+    
     tab.classList.add('active')
     tabView.classList.remove('hidden')
     activeTab = tabForActivation
@@ -256,38 +256,31 @@ const CreateTabManager = (target) => {
 
   return { openTab }
 }
-const tabManager = CreateTabManager(mainContainer)
+const tabManager = createTabManager(mainContainer, mk, head)
 
-const renderInObjectBrowser = (x) => {
-  const { object, target } = x
-
+const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
   dom.className = 'object'
 
   const name = mk(null, dom)
   name.innerText = object.data.name
-  name.style.fontWeight = 'bold'
   name.addEventListener('click', async (e) => {
-    if (openedObjects[object.id]) return
+    if (objectManager.openedObjects[object.id]) return
 
     tabManager.openTab(object)
-    openedObjects[object.id] = 1
-    await db.query(
-      `INSERT INTO kv (key, value) VALUES ($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      ['openedObjects', JSON.stringify(openedObjects)]
-    );
+    objectManager.openObject(object)
   })
 }
 
 const runObject = async (x) => {
-  const { object, db, objectBrowser } = x
-
-  const code = `export default async ($) => { ${object.data.code} }`
+  const { object, db, objectBrowser, objectManager, tabManager } = x
+  const code = `export default async ($) => { 
+    ${object.data.code}
+  }`
   const blob = new Blob([code], { type: 'application/javascript' })
   try {
     const m = (await import(URL.createObjectURL(blob)))
-    m.default({ o: object, db, objectBrowser, runObject })
+    m.default({ o: object, db, objectBrowser, objectManager, tabManager, runObject })
   } catch (e) {
     console.error(e)
   }
@@ -300,24 +293,17 @@ const processMainObject = async () => {
     console.log('need to import std data backup from backend')
     return
   }
-  await renderInObjectBrowser({ target: objectBrowser, object: mainObject })
-  await runObject({ object: mainObject, db, objectBrowser })
+  await renderObjectName(mainObject, objectBrowser)
+  await runObject({ object: mainObject, db, objectBrowser, objectManager, tabManager })
 
   return mainObject
 }
 
 const mainObject = await processMainObject()
 
-const restoreOpenedObjects = async (mainObject) => {
-  const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
-  if (rows.length > 0) {
-    const [ { value } ] = rows
-    openedObjects = JSON.parse(value)
-  }
-  for (const objectId in openedObjects) {
-    if (objectId.trim() === 'main') {
-      tabManager.openTab(mainObject)
-    }
+const openedObjects = await objectManager.getOpenedObjects(mainObject)
+for (const objectId in openedObjects) {
+  if (objectId.trim() === 'main') {
+    tabManager.openTab(mainObject)
   }
 }
-await restoreOpenedObjects(mainObject)
