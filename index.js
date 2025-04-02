@@ -62,8 +62,8 @@ const objectManager = {
   getOpenedObjects() {
     return this.openedObjects
   },
-  isObjectOpened(object) {
-    return Boolean(this.openedObjects[object.id])
+  isObjectOpened(objectId) {
+    return Boolean(this.openedObjects[objectId])
   },
   openObject(object, pos) {
     this.openedObjects[object.id] = pos ? pos : 1
@@ -169,24 +169,17 @@ const createTabManager = (target, mk, head) => {
       const activeTabIndex = Array.from(tabs).indexOf(tab)
 
       let tabForActivation
-      if (activeTabIndex > 0) {
-        const nextTab = tabs[activeTabIndex - 1]
-        const nextTabView = tabsView.querySelector(`[tab-view-object-id="${nextTab.getAttribute('tab-object-id')}"]`)
-        tabForActivation = { tab: nextTab, tabView: nextTabView }
-      } else {
-        const nextTab = tabs[activeTabIndex + 1]
-        if (nextTab) {
-          const nextTabView = tabsView.querySelector(`[tab-view-object-id="${nextTab.getAttribute('tab-object-id')}"]`)
-          tabForActivation = { tab: nextTab, tabView: nextTabView }
-        }
+      const nextTab = activeTabIndex > 0 
+        ? tabs[activeTabIndex - 1]
+        : tabs[activeTabIndex + 1];
+      if (nextTab) {
+        const nextTabView = tabsView.querySelector(`[tab-view-object-id="${nextTab.getAttribute('tab-object-id')}"]`);
+        tabForActivation = { tab: nextTab, tabView: nextTabView };
       }
       closeTab({ tab, tabView })
       objectManager.closeObject(object)
 
-      if (tabForActivation) {
-        activateTab(tabForActivation)
-        //objectManager.openObject(object)
-      }
+      if (tabForActivation) activateTab(tabForActivation)
     })
     closeTabBtn.innerHTML += `
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
@@ -258,6 +251,7 @@ const createTabManager = (target, mk, head) => {
 }
 const tabManager = createTabManager(mainContainer, mk, head)
 
+//todo send this to main script
 const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
   dom.className = 'object'
@@ -266,21 +260,26 @@ const renderObjectName = (object, target) => {
   name.innerText = object.data.name
   name.addEventListener('click', async (e) => {
     if (objectManager.openedObjects[object.id]) return
-
     tabManager.openTab(object)
     objectManager.openObject(object)
   })
+
+  const internal = mk(null, dom)
+  internal.className = 'internal-objects'
+  internal.style.marginLeft = '1em'
+
+  return { internal }
 }
 
 const runObject = async (x) => {
-  const { object, db, objectBrowser, objectManager, tabManager } = x
+  const { object, db, objectBrowser, objectManager, tabManager, renderObjectName } = x
   const code = `export default async ($) => { 
     ${object.data.code}
   }`
   const blob = new Blob([code], { type: 'application/javascript' })
   try {
     const m = (await import(URL.createObjectURL(blob)))
-    m.default({ o: object, db, objectBrowser, objectManager, tabManager, runObject })
+    m.default({ o: object, db, objectBrowser, objectManager, tabManager, runObject, renderObjectName })
   } catch (e) {
     console.error(e)
   }
@@ -294,7 +293,7 @@ const processMainObject = async () => {
     return
   }
   await renderObjectName(mainObject, objectBrowser)
-  await runObject({ object: mainObject, db, objectBrowser, objectManager, tabManager })
+  await runObject({ object: mainObject, db, objectBrowser, objectManager, tabManager, renderObjectName })
 
   return mainObject
 }
@@ -302,6 +301,9 @@ const processMainObject = async () => {
 const mainObject = await processMainObject()
 
 const openedObjects = await objectManager.getOpenedObjects(mainObject)
+console.log(openedObjects)
+
+
 for (const objectId in openedObjects) {
   if (objectId.trim() === 'main') {
     tabManager.openTab(mainObject)
