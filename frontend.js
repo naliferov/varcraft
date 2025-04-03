@@ -1,3 +1,23 @@
+const { 
+  promise: serviceWorkerPromise, 
+  resolve: serviceWorkerResolve,
+  reject: serviceWorkerIReject 
+} = Promise.withResolvers()
+
+onload = () => {
+  navigator.serviceWorker
+      .register('service-worker.js', { scope: '/' })
+      .then(reg => {
+        console.log('sw registered')
+        serviceWorkerResolve(reg)
+      })
+      .catch(err => {
+        console.error('sw reg failed:', err)
+        serviceWorkerReject()
+      })
+}
+await serviceWorkerPromise
+
 const mk = (id, target, tag = 'div') => {
   const el = document.createElement(tag)
   if (id) el.id = id
@@ -24,7 +44,7 @@ document.body.style.margin = 0
 
 const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
 const db = new PGlite('idb://my-pgdata')
-const head = document.getElementsByTagName('head')[0]
+const head = document.head
 const fontUrl = 'https://fonts.googleapis.com/css2?family';
 
 const { promise: editorIsReady, resolve: editorIsReadyResolve } = Promise.withResolvers()
@@ -34,7 +54,7 @@ requireScript.onload = () => {
     require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } })
     require(['vs/editor/editor.main'], editorIsReadyResolve)
 }
-document.head.append(requireScript)
+head.append(requireScript)
 await editorIsReady;
 
 [
@@ -48,6 +68,7 @@ await editorIsReady;
 });
 
 const objectManager = {
+  activeTabId: null,
   openedObjects: {},
   setDb(db) {
     this.db = db
@@ -132,9 +153,12 @@ const createTabManager = (target, mk, head) => {
     .tab.active {
       background: #FFFFFF;
     }
+    .tab-name {
+      font-family: Roboto, sans-serif;
+    }
     .tab-view.hidden {
       display: none;
-    }
+    } 
     .object-code {
       font-family: 'JetBrains Mono', monospace;
     }
@@ -251,7 +275,6 @@ const createTabManager = (target, mk, head) => {
 }
 const tabManager = createTabManager(mainContainer, mk, head)
 
-//todo send this to main script
 const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
   dom.className = 'object'
@@ -303,9 +326,17 @@ const mainObject = await processMainObject()
 const openedObjects = await objectManager.getOpenedObjects(mainObject)
 console.log(openedObjects)
 
-
 for (const objectId in openedObjects) {
   if (objectId.trim() === 'main') {
     tabManager.openTab(mainObject)
   }
 }
+
+navigator.serviceWorker.controller.postMessage({
+  type: 'cache-these',
+  urls: [
+    '/data/project.json',
+    'https://cdn.jsdelivr.net/npm/monaco-editor@latest/min/vs/editor/editor.main.js',
+    // любые ресурсы, которые реально использовались
+  ]
+});
