@@ -45,7 +45,7 @@ document.body.style.margin = 0
 const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
 const db = new PGlite('idb://my-pgdata')
 const head = document.head
-const fontUrl = 'https://fonts.googleapis.com/css2?family';
+const fontUrl = 'https://fonts.googleapis.com/css2?family'
 
 const { promise: editorIsReady, resolve: editorIsReadyResolve } = Promise.withResolvers()
 const requireScript = document.createElement('script');
@@ -65,15 +65,13 @@ await editorIsReady;
   link.rel = 'stylesheet'
   link.href = url
   head.appendChild(link)
-});
+})
 
 const objectManager = {
-  activeTabId: null,
   openedObjects: {},
-  setDb(db) {
+  async init(db) {
     this.db = db
-  },
-  async initOpenedObjects() {
+
     const { rows } = await this.db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
     if (rows.length > 0) {
       const [ { value } ] = rows
@@ -88,14 +86,14 @@ const objectManager = {
   },
   openObject(object, pos) {
     this.openedObjects[object.id] = pos ? pos : 1
-    this.saveInDb()
+    this.saveOpenedObjects()
   },
   openObjectWithObject(object, otherObject) {},
   closeObject(object) {
     delete this.openedObjects[object.id]
-    this.saveInDb()
+    this.saveOpenedObjects()
   },
-  saveInDb() {
+  saveOpenedObjects() {
     this.db.query(
       `INSERT INTO kv (key, value) VALUES ($1, $2)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
@@ -103,9 +101,7 @@ const objectManager = {
     );
   },
 }
-objectManager.setDb(db)
-await objectManager.initOpenedObjects()
-
+await objectManager.init(db)
 
 const app = mk('app', document.body)
 app.style.display = 'flex'
@@ -132,9 +128,7 @@ mainContainer.style.width = `calc(100% - ${objectBrowserWidth + objectBrowserPad
 const objectsView = mk('objects-view', app)
 objectsView.style.position = `absolute`
 
-const createTabManager = (target, mk, head) => {
-
-  let activeTab
+const createTabManager = (target, mk, head, db) => {
 
   const tabsContainer = mk('tabs-container', target)
   const style = mk(null, head, 'style')
@@ -174,15 +168,17 @@ const createTabManager = (target, mk, head) => {
   tabsView.style.height = window.innerHeight + 'px' 
   tabsView.style.overflow = 'scroll'
 
+  let activeTab
+
   const openTab = (object) => {
     const tab = mk(null, tabsPanel)
     tab.className = 'tab active'
-    tab.setAttribute('tab-object-id', object.id)
+    tab.setAttribute('object-id', object.id)
 
-    const name = mk(null, tab)
-    name.className = 'tab-name'
-    name.innerText = object.data.name
-    name.style.marginRight = '3px'
+    const tabName = mk(null, tab)
+    tabName.className = 'tab-name'
+    tabName.innerText = object.data.name
+    tabName.style.marginRight = '3px'
     
     const closeTabBtn = mk('close-tab-btn', tab)
     closeTabBtn.addEventListener('click', (e) => {
@@ -197,13 +193,18 @@ const createTabManager = (target, mk, head) => {
         ? tabs[activeTabIndex - 1]
         : tabs[activeTabIndex + 1];
       if (nextTab) {
-        const nextTabView = tabsView.querySelector(`[tab-view-object-id="${nextTab.getAttribute('tab-object-id')}"]`);
-        tabForActivation = { tab: nextTab, tabView: nextTabView };
+        tabForActivation = { 
+          tab: nextTab,
+          tabView: tabsView.querySelector(`[object-id="${nextTab.getAttribute('object-id')}"]`) 
+        }
       }
       closeTab({ tab, tabView })
       objectManager.closeObject(object)
 
-      if (tabForActivation) activateTab(tabForActivation)
+      if (tabForActivation) {
+        activateTab(tabForActivation)
+        saveActiveTab(tabForActivation.tab.getAttribute('object-id'))
+      }
     })
     closeTabBtn.innerHTML += `
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
@@ -213,7 +214,7 @@ const createTabManager = (target, mk, head) => {
     
     const tabView = mk(null, tabsView)
     tabView.className = 'tab-view'
-    tabView.setAttribute('tab-view-object-id', object.id)
+    tabView.setAttribute('object-id', object.id)
 
     const pre = mk(null, tabView, 'div')
     pre.style.height = '900px'
@@ -247,8 +248,11 @@ const createTabManager = (target, mk, head) => {
     const tabForActivation = { tab, tabView }
     tab.addEventListener('click', () => {
       activateTab(tabForActivation)
+      saveActiveTab(object.id)
     })
     activateTab(tabForActivation)
+
+    return tabForActivation
   }
 
   const closeTab = (tabForDeactivation) => {
@@ -271,9 +275,30 @@ const createTabManager = (target, mk, head) => {
     activeTab = tabForActivation
   }
 
-  return { openTab }
+  const saveActiveTab = (id) => {
+    db.query(
+      `INSERT INTO kv (key, value) VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      ['activeTabId', id]
+    )
+  }
+
+  const restoreLastActiveTab = async () => {
+    const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['activeTabId'])
+    if (!rows.length) return
+
+    const [ { value } ] = rows
+    const tab = tabsPanel.querySelector(`[object-id="${value}"]`)
+    const tabView = tabsView.querySelector(`[object-id="${value}"]`)
+
+    if (tab && tabView) {
+      activateTab({ tab, tabView })
+    }
+  }
+
+  return { openTab, saveActiveTab, restoreLastActiveTab }
 }
-const tabManager = createTabManager(mainContainer, mk, head)
+const tabManager = createTabManager(mainContainer, mk, head, db)
 
 const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
@@ -284,6 +309,7 @@ const renderObjectName = (object, target) => {
   name.addEventListener('click', async (e) => {
     if (objectManager.openedObjects[object.id]) return
     tabManager.openTab(object)
+    tabManager.saveActiveTab(object.id)
     objectManager.openObject(object)
   })
 
@@ -324,19 +350,8 @@ const processMainObject = async () => {
 const mainObject = await processMainObject()
 
 const openedObjects = await objectManager.getOpenedObjects(mainObject)
-console.log(openedObjects)
-
 for (const objectId in openedObjects) {
   if (objectId.trim() === 'main') {
     tabManager.openTab(mainObject)
   }
 }
-
-navigator.serviceWorker.controller.postMessage({
-  type: 'cache-these',
-  urls: [
-    '/data/project.json',
-    'https://cdn.jsdelivr.net/npm/monaco-editor@latest/min/vs/editor/editor.main.js',
-    // любые ресурсы, которые реально использовались
-  ]
-});
