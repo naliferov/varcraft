@@ -232,16 +232,15 @@ const createTabManager = (target, mk, head, db) => {
     if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
 
     editor.onDidChangeModelContent((e) => {
-      if (!object.id || object.id.trim() !== 'main') {
-        return
-      }
+      if (!object.id) return
+      
       const pos = editor.getPosition()
-      objectManager.openObject(object, pos)
+      objectManager.openObject(object, pos) //rename this
       
       object.data.code = editor.getValue()
       db.query(
         `UPDATE objects SET data = $1 WHERE id = $2`,
-        [JSON.stringify(object.data), 'main']
+        [JSON.stringify(object.data), object.id]
       )
     })
 

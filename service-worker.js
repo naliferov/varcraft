@@ -1,4 +1,4 @@
-const CACHE_NAME = 'varcraft-cache-v35'
+const CACHE_NAME = 'varcraft-cache-v36'
 const urlsToCache = [
   '/',
   'frontend.js',
