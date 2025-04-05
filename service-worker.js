@@ -1,7 +1,18 @@
-const CACHE_NAME = 'varcraft-cache-v31'
+const CACHE_NAME = 'varcraft-cache-v35'
+const urlsToCache = [
+  '/',
+  'frontend.js',
+  'manifest.json',
+  'assets/code-256.png',
+]
 
 self.addEventListener('install', event => {
-  //event.waitUntil(caches.open(CACHE_NAME).then(() => self.skipWaiting()))
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+    .then(cache => cache.addAll(urlsToCache))
+    .then(() => self.skipWaiting())
+  )
+  console.log('sw installed')
 })
 
 self.addEventListener('fetch', event => {

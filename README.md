@@ -1,4 +1,4 @@
 # varcraft
 🧙‍♂️ Javascript sandbox
 
-Edit objects with javascript and run it.
+Edit objects contain javascript code and execute it in sandbox.
