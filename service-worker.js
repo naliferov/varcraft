@@ -1,32 +1,8 @@
-
-const CACHE_NAME = 'varcraft-cache-v2'
-const urlsToCache = [
-  '/',
-  //'frontend.js'
-]
+const CACHE_NAME = 'varcraft-cache-v31'
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-    .then(cache => cache.addAll(urlsToCache))
-    .then(() => self.skipWaiting())
-  )
-  console.log('sw installed')
+  //event.waitUntil(caches.open(CACHE_NAME).then(() => self.skipWaiting()))
 })
-
-//new waiting for cache
-// const responseToCache = networkResponse.clone()
-// caches.open(CACHE_NAME).then(cache => {
-//     cache.put(event.request, responseToCache)
-// })
-
-self.addEventListener('message', event => {
-  if (!event.data || event.data.type !== 'cache requests') return
-
-  console.log('cache requests')
-})
-
-const opaqueResponses = new Map()
 
 self.addEventListener('fetch', event => {
   event.respondWith(
@@ -35,18 +11,15 @@ self.addEventListener('fetch', event => {
         if (response) return response
 
         return fetch(event.request).then(
-          networkResponse => {
-            if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-              return networkResponse
-            }
-            console.log('cache fetch add', event.request.url)
+          (netResponse) => {
+            if (!netResponse) return netResponse
 
-            const responseToCache = networkResponse.clone()
+            console.log('cache request', event.request.url)
+            const responseToCache = netResponse.clone()
             caches.open(CACHE_NAME).then(cache => {
                 cache.put(event.request, responseToCache)
             })
-
-            return networkResponse
+            return netResponse
           }
         )
       })
