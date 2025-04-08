@@ -127,12 +127,29 @@ style.textContent = `
   .object-browser-section {
     margin-bottom: 0.5em;
   }
+  .object-browser-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 `
 objectBrowser.appendChild(style)
 
-const objectBrowserHeading = mk(0, objectBrowser)
-objectBrowserHeading.textContent = 'EXPLORER'
+const objectBrowserHeader = mk(0, objectBrowser)
+objectBrowserHeader.className = 'object-browser-header'
 mk(0, objectBrowser, 'br')
+
+objectBrowserHeader.innerHTML = `
+  <svg style="width: 24px; height: 24px; cursor: pointer;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+  </svg>
+`
+objectBrowserHeader.addEventListener('click', (e) => {
+  console.log('test')
+})
+
+const objectBrowserHeading = mk(0, objectBrowserHeader)
+objectBrowserHeading.textContent = 'EXPLORER'
 
 objectBrowser.systemSection = mk('object-browser-system-section', objectBrowser)
 objectBrowser.systemSection.className = 'object-browser-section'
@@ -205,22 +222,25 @@ const createTabManager = (target, mk, db, width) => {
     
     const closeTabBtn = mk('close-tab-btn', tab)
     closeTabBtn.addEventListener('click', (e) => {
-
       e.stopPropagation()
 
-      const tabs = tabsPanel.children
-      const activeTabIndex = Array.from(tabs).indexOf(tab)
-
       let tabForActivation
-      const nextTab = activeTabIndex > 0 
-        ? tabs[activeTabIndex - 1]
-        : tabs[activeTabIndex + 1];
-      if (nextTab) {
-        tabForActivation = { 
-          tab: nextTab,
-          tabView: tabsView.querySelector(`[object-id="${nextTab.getAttribute('object-id')}"]`) 
-        }
+
+      if (tab === activeTab.tab) {
+        const tabs = tabsPanel.children
+        const tabIndex = Array.from(tabs).indexOf(tab)
+        const nextTab = tabIndex > 0 
+          ? tabs[tabIndex - 1]
+          : tabs[tabIndex + 1];
+
+        if (nextTab) {
+          tabForActivation = { 
+            tab: nextTab,
+            tabView: tabsView.querySelector(`[object-id="${nextTab.getAttribute('object-id')}"]`) 
+          }
+        } 
       }
+
       closeTab({ tab, tabView })
       objectManager.closeObject(object)
 
