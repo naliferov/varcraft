@@ -25,6 +25,10 @@ const mk = (id, target, tag = 'div') => {
   return el
 }
 
+const app = mk('app', document.body)
+app.style.display = 'flex'
+app.style.alignItems = 'flex-start'
+
 const kvRepository = {
   db: null,
   async getKey(key) {
@@ -44,6 +48,7 @@ document.body.style.margin = 0
 
 const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
 const db = new PGlite('idb://my-pgdata')
+
 const head = document.head
 const fontUrl = 'https://fonts.googleapis.com/css2?family'
 
@@ -103,40 +108,57 @@ const objectManager = {
 }
 await objectManager.init(db)
 
-const app = mk('app', document.body)
-app.style.display = 'flex'
-app.style.alignItems = 'flex-start'
-
 const objectBrowserWidth = 250
 const objectBrowserPadding = 8
-const objectBrowser = mk('object-browser', app)
+let objectBrowser = mk('object-browser', app)
 objectBrowser.style.width = objectBrowserWidth + 'px'
 objectBrowser.style.height = window.innerHeight - objectBrowserPadding * 2 + 'px'
 objectBrowser.style.padding = objectBrowserPadding + 'px'
 
-objectBrowser.style.background = '#f3f3f3'
-objectBrowser.style.color = '#616161'
-objectBrowser.style.fontFamily = 'Roboto, monospace'
+objectBrowser = objectBrowser.attachShadow({mode: 'open'})
+const style = mk(0, objectBrowser, 'style')
+style.textContent = `
+  :host {
+    display: block;
+    background: #f3f3f3;
+    color: #616161;
+    font-family: Roboto, monospace;
+  }
+  .object-browser-section {
+    margin-bottom: 0.5em;
+  }
+`
+objectBrowser.appendChild(style)
 
-const smallHeading = mk(0, objectBrowser)
-smallHeading.innerText = 'EXPLORER'
+const objectBrowserHeading = mk(0, objectBrowser)
+objectBrowserHeading.textContent = 'EXPLORER'
 mk(0, objectBrowser, 'br')
 
-const mainContainer = mk('main-container', app)
-mainContainer.style.width = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
+objectBrowser.systemSection = mk('object-browser-system-section', objectBrowser)
+objectBrowser.systemSection.className = 'object-browser-section'
 
-const objectsView = mk('objects-view', app)
-objectsView.style.position = `absolute`
+let sectionHeading = mk(0, objectBrowser.systemSection)
+sectionHeading.textContent = 'System:'
+sectionHeading.style.fontWeight = 'bold'
 
-const createTabManager = (target, mk, head, db) => {
+objectBrowser.userSection = mk('object-browser-user-section', objectBrowser)
+objectBrowser.userSection.className = 'object-browser-section'
+
+sectionHeading = mk(0, objectBrowser.userSection)
+sectionHeading.textContent = 'User:'
+sectionHeading.style.fontWeight = 'bold'
+
+const createTabManager = (target, mk, db, width) => {
 
   const tabsContainer = mk('tabs-container', target)
-  const style = mk(null, head, 'style')
+
+  tabsContainer.style.width = width
+  const style = mk(null, tabsContainer, 'style')
   style.innerHTML = `
-    #tabs-panel {
-      display: flex;
-      background: #f3f3f3;
-    }
+  #tabs-panel {
+    display: flex;
+    background: #f3f3f3;
+  }
     .tab {
       display: flex;
       align-items: center;
@@ -149,6 +171,8 @@ const createTabManager = (target, mk, head, db) => {
     }
     .tab-name {
       font-family: Roboto, sans-serif;
+      margin-right: 3px;
+      color: #333333;
     }
     .tab-view.hidden {
       display: none;
@@ -178,7 +202,6 @@ const createTabManager = (target, mk, head, db) => {
     const tabName = mk(null, tab)
     tabName.className = 'tab-name'
     tabName.innerText = object.data.name
-    tabName.style.marginRight = '3px'
     
     const closeTabBtn = mk('close-tab-btn', tab)
     closeTabBtn.addEventListener('click', (e) => {
@@ -235,7 +258,7 @@ const createTabManager = (target, mk, head, db) => {
       if (!object.id) return
       
       const pos = editor.getPosition()
-      objectManager.openObject(object, pos) //rename this
+      objectManager.openObject(object, pos) //rename this name
       
       object.data.code = editor.getValue()
       db.query(
@@ -297,7 +320,12 @@ const createTabManager = (target, mk, head, db) => {
 
   return { openTab, saveActiveTab, restoreLastActiveTab }
 }
-const tabManager = createTabManager(mainContainer, mk, head, db)
+
+const tabManagerWidth = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
+const tabManager = createTabManager(app, mk, db, tabManagerWidth)
+
+const objectsView = mk('objects-view', app)
+objectsView.style.position = `absolute`
 
 const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
@@ -312,14 +340,14 @@ const renderObjectName = (object, target) => {
     objectManager.openObject(object)
   })
 
-  const internal = mk(null, dom)
-  internal.className = 'internal-objects'
-  internal.style.marginLeft = '1em'
+  const children = mk(null, dom)
+  children.className = 'children'
+  children.style.marginLeft = '1em'
 
-  return { internal }
+  return { children }
 }
 
-const runObject = async (x) => {
+const runMainObject = async (x) => {
   const { object, db, objectBrowser, objectManager, tabManager, renderObjectName } = x
   const code = `export default async ($) => { 
     ${object.data.code}
@@ -327,7 +355,7 @@ const runObject = async (x) => {
   const blob = new Blob([code], { type: 'application/javascript' })
   try {
     const m = (await import(URL.createObjectURL(blob)))
-    m.default({ o: object, db, objectBrowser, objectManager, tabManager, runObject, renderObjectName })
+    m.default({ o: object, db, objectBrowser, objectManager, tabManager, renderObjectName })
   } catch (e) {
     console.error(e)
   }
@@ -340,8 +368,8 @@ const processMainObject = async () => {
     console.log('need to import std data backup from backend')
     return
   }
-  await renderObjectName(mainObject, objectBrowser)
-  await runObject({ object: mainObject, db, objectBrowser, objectManager, tabManager, renderObjectName })
+  await renderObjectName(mainObject, objectBrowser.systemSection)
+  await runMainObject({ object: mainObject, db, objectBrowser, objectManager, tabManager, renderObjectName })
 
   return mainObject
 }
