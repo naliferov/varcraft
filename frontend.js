@@ -1,3 +1,5 @@
+document.body.style.margin = 0
+
 const { 
   promise: serviceWorkerPromise, 
   resolve: serviceWorkerResolve,
@@ -12,7 +14,7 @@ onload = () => {
         serviceWorkerResolve(reg)
       })
       .catch(err => {
-        console.error('sw reg failed:', err)
+        console.error('sw reg failed', err)
         serviceWorkerReject()
       })
 }
@@ -20,37 +22,31 @@ await serviceWorkerPromise
 
 const mk = (id, target, tag = 'div') => {
   const el = document.createElement(tag)
-  if (id) el.id = id
+  if (id) {
+    if (id[0] === '.') {
+      el.className = id.slice(1)
+    } else {
+      el.id = id
+    }
+  }
   target.append(el)
   return el
 }
 
 const app = mk('app', document.body)
 app.style.display = 'flex'
-app.style.alignItems = 'flex-start'
-
-const kvRepository = {
-  db: null,
-  async getKey(key) {
-    const { rows } = await this.db.query(`SELECT * FROM kv WHERE key = $1`, [key])
-    if (rows.length > 0) {
-      const [ { value } ] = rows
-      return value
-    }
-  },
-  async setKey(key, value) {
-    await this.db.query(`INSERT INTO kv (key, value) VALUES ($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value])
-  },
-}
-
-document.body.style.margin = 0
-
-const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
-const db = new PGlite('idb://my-pgdata')
 
 const head = document.head
-const fontUrl = 'https://fonts.googleapis.com/css2?family'
+const fontUrl = 'https://fonts.googleapis.com/css2?family';
+[
+  `${fontUrl}=Roboto:wght@400;700&display=swap`,
+  `${fontUrl}=JetBrains+Mono:wght@400;700&display=swap`
+].forEach(url => {
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = url
+  head.appendChild(link)
+})
 
 const { promise: editorIsReady, resolve: editorIsReadyResolve } = Promise.withResolvers()
 const requireScript = document.createElement('script');
@@ -62,15 +58,32 @@ requireScript.onload = () => {
 head.append(requireScript)
 await editorIsReady;
 
-[
-  `${fontUrl}=Roboto:wght@400;700&display=swap`,
-  `${fontUrl}=JetBrains+Mono:wght@400;700&display=swap`
-].forEach(url => {
-  const link = document.createElement('link')
-  link.rel = 'stylesheet'
-  link.href = url
-  head.appendChild(link)
+const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
+const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
+const db = await createDb('my-pgdata')
+const dbUser = await createDb('db-user')
+
+const baseRepository = {
+  db: null,
+  init(db) { this.db = db }
+}
+const createRepository = (child) => Object.assign(Object.create(baseRepository), child)
+
+const systemObjectsRepository = {}
+const kvRepository = createRepository({
+  async getKey(key) {
+    const { rows } = await this.db.query(`SELECT * FROM kv WHERE key = $1`, [key])
+    if (rows.length > 0) {
+      const [ { value } ] = rows
+      return value
+    }
+  },
+  async setKey(key, value) {
+    await this.db.query(`INSERT INTO kv (key, value) VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value])
+  }
 })
+kvRepository.init(db)
 
 const objectManager = {
   openedObjects: {},
@@ -132,6 +145,23 @@ style.textContent = `
     align-items: center;
     gap: 8px;
   }
+  .ctx-menu-btn {
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+  }
+  .ctx-menu {
+    position: absolute;
+    background: #f3f3f3;
+    box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
+  }
+  .ctx-menu-item {
+    padding: 5px 15px;
+    cursor: pointer;
+  }
+  .ctx-menu-item:hover {
+    background:rgb(221, 221, 221);
+  }
 `
 objectBrowser.appendChild(style)
 
@@ -139,13 +169,49 @@ const objectBrowserHeader = mk(0, objectBrowser)
 objectBrowserHeader.className = 'object-browser-header'
 mk(0, objectBrowser, 'br')
 
-objectBrowserHeader.innerHTML = `
-  <svg style="width: 24px; height: 24px; cursor: pointer;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6">
+const ctxMenuBtn = mk('.ctx-menu-btn', objectBrowserHeader)
+ctxMenuBtn.innerHTML = `
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6">
   <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
   </svg>
 `
-objectBrowserHeader.addEventListener('click', (e) => {
-  console.log('test')
+const ctxMenuBtnRect = ctxMenuBtn.getBoundingClientRect()
+let ctxMenu
+
+ctxMenuBtn.addEventListener('click', (e) => {
+  if (ctxMenu) {
+    ctxMenu.remove()
+    ctxMenu = null
+    return
+  }
+  ctxMenu = mk('.ctx-menu', objectBrowser)
+  ctxMenu.style.left = `${ctxMenuBtnRect.left}px`
+  ctxMenu.style.top = `${ctxMenuBtnRect.top + ctxMenuBtnRect.height}px`
+
+  const itemImport = mk(null, ctxMenu)
+  itemImport.className = 'ctx-menu-item'
+  itemImport.textContent = 'Import system objects'
+  itemImport.addEventListener('click', () => {
+    console.log('import')
+  })
+  const itemExport = mk(null, ctxMenu)
+  itemExport.className = 'ctx-menu-item'
+  itemExport.textContent = 'Export system objects'
+  itemExport.addEventListener('click', () => {
+    console.log('export')
+  })
+  // const itemUserImport = mk(null, ctxMenu)
+  // itemUserImport.className = 'ctx-menu-item'
+  // itemUserImport.textContent = 'Import user objects'
+  // itemUserImport.addEventListener('click', () => {
+  //   console.log('import')
+  // })
+  // const itemUserExport = mk(null, ctxMenu)
+  // itemUserExport.className = 'ctx-menu-item'
+  // itemUserExport.textContent = 'Export user objects'
+  // itemUserExport.addEventListener('click', () => {
+  //   console.log('export')
+  // })
 })
 
 const objectBrowserHeading = mk(0, objectBrowserHeader)
@@ -172,10 +238,10 @@ const createTabManager = (target, mk, db, width) => {
   tabsContainer.style.width = width
   const style = mk(null, tabsContainer, 'style')
   style.innerHTML = `
-  #tabs-panel {
-    display: flex;
-    background: #f3f3f3;
-  }
+    #tabs-panel {
+      display: flex;
+      background: #f3f3f3;
+    }
     .tab {
       display: flex;
       align-items: center;
