@@ -90,6 +90,19 @@ const systemObjectsRepository = createRepository({
   },
   async updateObjectData(objectId, data) {
     await this.db.query(`UPDATE ${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
+  },
+  async getNextObjectsRecursive(objectId) {
+    const iterateSql = `
+      WITH RECURSIVE next_objects AS (
+        SELECT o.* FROM objects o
+        WHERE o.id = $1
+        UNION ALL
+        SELECT o.* FROM objects o
+        INNER JOIN next_objects no ON o.id = no.next_id
+      )
+      SELECT * FROM next_objects;
+    `;
+    return await this.db.query(iterateSql, [objectId])
   }
 })
 systemObjectsRepository.init(dbSystem)
@@ -134,10 +147,8 @@ const objectManager = {
   openedObjects: {},
   async init(db) {
     this.db = db
-
-    const { rows } = await this.db.query(`SELECT * FROM kv WHERE key = $1`, ['openedObjects'])
-    if (rows.length > 0) {
-      const [ { value } ] = rows
+    const value = await kvRepository.getKey('openedObjects')
+    if (value) {
       this.openedObjects = JSON.parse(value)
     }
   },
@@ -247,9 +258,9 @@ ctxMenuBtn.addEventListener('click', (e) => {
 
     const r = new FileReader()
     r.readAsText(file)
-    r.onload = async() => {
+    r.onload = async() => {      
       dbSystem.exec(r.result)
-      console.log('imported complete')
+      console.log('import complete')
     }
   })
 
@@ -403,21 +414,25 @@ const createTabManager = (target, mk, db, width) => {
     pre.className = 'object-code'
     pre.setAttribute('object-id', object.id)
 
+    const code = object.data.code.replace(/\\n/g, '\n')
     const editor = monaco.editor.create(pre, {
-      value: object.data.code, language: 'javascript',
-      theme: 'vs-dark', automaticLayout: true, fontSize: 15
+      value: code, 
+      language: 'javascript',
+      theme: 'vs-dark', 
+      automaticLayout: true, 
+      fontSize: 15
     })
-    const pos = openedObjects[object.id]
-    if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
+
+    //const pos = openedObjects[object.id]
+    //if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
 
     editor.onDidChangeModelContent((e) => {
       if (!object.id) return
       
       const pos = editor.getPosition()
       objectManager.openObject(object, pos) //rename this name
-      
       object.data.code = editor.getValue()
-      systemObjectsRepository.updateObjectCode(object.data.code)
+      systemObjectsRepository.updateObjectData(object.id, object.data)
     })
 
     const tabForActivation = { tab, tabView }
@@ -451,12 +466,10 @@ const createTabManager = (target, mk, db, width) => {
   }
 
   const saveActiveTab = (id) => kvRepository.setKey('activeTabId', id)
-
   const restoreLastActiveTab = async () => {
-    const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['activeTabId'])
-    if (!rows.length) return
+    const value = await kvRepository.getKey('activeTabId')
+    if (!value) return
 
-    const [ { value } ] = rows
     const tab = tabsBar.querySelector(`[object-id="${value}"]`)
     const tabView = tabsView.querySelector(`[object-id="${value}"]`)
 
@@ -495,39 +508,43 @@ const renderObjectName = (object, target) => {
 }
 
 const runMainObject = async (x) => {
-  const { object, db, objectBrowser, objectManager, tabManager, renderObjectName } = x
+  const { object, objectBrowser, objectManager, tabManager, 
+    renderObjectName, systemObjectsRepository, userObjectsRepository } = x
   const code = `export default async ($) => { 
     ${object.data.code}
   }`
   const blob = new Blob([code], { type: 'application/javascript' })
   try {
     const m = (await import(URL.createObjectURL(blob)))
-    m.default({ o: object, objectBrowser, objectManager, tabManager, renderObjectName })
+    m.default({ 
+      o: object, objectBrowser, objectManager, tabManager, renderObjectName, 
+      systemObjectsRepository, userObjectsRepository
+    })
   } catch (e) {
     console.error(e)
   }
 }
 
-if (!await kvRepository.isExists()) {
-  await kvRepository.initTable()
-}
+if (!await kvRepository.isExists()) await kvRepository.initTable()
+await objectManager.init(dbUser)
 
-//await objectManager.init(dbUser)
 
+let mainObject
 if (await systemObjectsRepository.isExists()) {
-  const mainObject = await systemObjectsRepository.getById('main')
+  mainObject = await systemObjectsRepository.getById('main')
   await renderObjectName(mainObject, objectBrowser.systemSection)
-  //await runMainObject({ object: mainObject, dbSystem, objectBrowser, objectManager, tabManager, renderObjectName })
+  await runMainObject({ 
+    object: mainObject, dbSystem, objectBrowser, objectManager, tabManager, renderObjectName,
+    systemObjectsRepository, userObjectsRepository
+  })
 } else {
+  //import system db from dump
   console.log('need to import std data backup from backend')
-
   //const mainObject = await processMainObject()
 }
 
-
-//const openedObjects = await objectManager.getOpenedObjects(mainObject)
-//for (const objectId in openedObjects) {
-//  if (objectId.trim() === 'main') {
-//    tabManager.openTab(mainObject)
-//  }
-//}
+//actually objects opened by tabManager
+const openedObjects = await objectManager.getOpenedObjects(mainObject)
+for (const objectId in openedObjects) {
+ if (objectId.trim() === 'main') tabManager.openTab(mainObject)
+}
