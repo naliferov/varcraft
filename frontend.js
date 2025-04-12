@@ -60,30 +60,75 @@ await editorIsReady;
 
 const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
 const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
-const db = await createDb('my-pgdata')
+const dbSystem = await createDb('db-system')
 const dbUser = await createDb('db-user')
 
 const baseRepository = {
   db: null,
-  init(db) { this.db = db }
+  table: null,
+  init(db) { 
+    this.db = db
+  },
+  async getById(id) {
+    const { rows } = await this.db.query(`SELECT * FROM ${this.table} WHERE id = $1`, [id])
+    return rows[0]
+  },
+  async isExists() {
+    const { rows } = await this.db.query(`
+      SELECT * FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`)
+    return rows.find(row => row.table_name === this.table)
+  },
 }
 const createRepository = (child) => Object.assign(Object.create(baseRepository), child)
 
-const systemObjectsRepository = {}
+const systemObjectsRepository = createRepository({
+  table: 'objects',
+  async getObjects() {
+    const { rows } = await this.db.query(`SELECT * FROM ${this.table}`)
+    return rows
+  },
+  async updateObjectData(objectId, data) {
+    await this.db.query(`UPDATE ${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
+  }
+})
+systemObjectsRepository.init(dbSystem)
+
+const userObjectsRepository = createRepository({
+  table: 'objects',
+  async getObjects() {
+    const { rows } = await this.db.query(`SELECT * FROM ${this.table}`)
+    return rows
+  },
+  async updateObjectData(objectId, data) {
+    await this.db.query(`UPDATE ${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
+  },
+})
+userObjectsRepository.init(dbUser)
+
 const kvRepository = createRepository({
+  table: 'kv',
+  async initTable() {
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS ${this.table} (
+        key character varying(26) NOT NULL PRIMARY KEY,
+        value text
+      )
+    `)
+  },
   async getKey(key) {
-    const { rows } = await this.db.query(`SELECT * FROM kv WHERE key = $1`, [key])
+    const { rows } = await this.db.query(`SELECT * FROM ${this.table} WHERE key = $1`, [key])
     if (rows.length > 0) {
       const [ { value } ] = rows
       return value
     }
   },
   async setKey(key, value) {
-    await this.db.query(`INSERT INTO kv (key, value) VALUES ($1, $2)
+    await this.db.query(`INSERT INTO ${this.table} (key, value) VALUES ($1, $2)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value])
   }
 })
-kvRepository.init(db)
+kvRepository.init(dbUser)
 
 const objectManager = {
   openedObjects: {},
@@ -112,14 +157,9 @@ const objectManager = {
     this.saveOpenedObjects()
   },
   saveOpenedObjects() {
-    this.db.query(
-      `INSERT INTO kv (key, value) VALUES ($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      ['openedObjects', JSON.stringify(this.openedObjects)]
-    );
+    kvRepository.setKey('openedObjects', JSON.stringify(this.openedObjects))
   },
 }
-await objectManager.init(db)
 
 const objectBrowserWidth = 250
 const objectBrowserPadding = 8
@@ -150,18 +190,6 @@ style.textContent = `
     height: 24px;
     cursor: pointer;
   }
-  .ctx-menu {
-    position: absolute;
-    background: #f3f3f3;
-    box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
-  }
-  .ctx-menu-item {
-    padding: 5px 15px;
-    cursor: pointer;
-  }
-  .ctx-menu-item:hover {
-    background:rgb(221, 221, 221);
-  }
 `
 objectBrowser.appendChild(style)
 
@@ -184,21 +212,67 @@ ctxMenuBtn.addEventListener('click', (e) => {
     ctxMenu = null
     return
   }
-  ctxMenu = mk('.ctx-menu', objectBrowser)
+  ctxMenu = mk('.ctx-menu', app)
+  const style = mk(null, ctxMenu, 'style')
+  style.innerHTML = `
+    .ctx-menu {
+      position: absolute;
+      background: #f3f3f3;
+      box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
+    }
+    .ctx-menu-item {
+      padding: 5px 0;
+      cursor: pointer;
+    }
+    .ctx-menu-item:hover {
+      background:rgb(221, 221, 221);
+    }
+  `
   ctxMenu.style.left = `${ctxMenuBtnRect.left}px`
   ctxMenu.style.top = `${ctxMenuBtnRect.top + ctxMenuBtnRect.height}px`
+  ctxMenu.style.position = 'absolute'
+  ctxMenu.style.background = '#f3f3f3'
+  ctxMenu.style.boxShadow = 'rgba(99, 99, 99, 0.2) 0px 2px 8px 0px'
 
   const itemImport = mk(null, ctxMenu)
   itemImport.className = 'ctx-menu-item'
   itemImport.textContent = 'Import system objects'
-  itemImport.addEventListener('click', () => {
-    console.log('import')
+
+  const fInput = mk(null, itemImport, 'input')
+  fInput.type = 'file'
+  fInput.style.marginLeft = '10px'
+  fInput.addEventListener('change', (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    const r = new FileReader()
+    r.readAsText(file)
+    r.onload = async() => {
+      dbSystem.exec(r.result)
+      console.log('imported complete')
+    }
   })
+
   const itemExport = mk(null, ctxMenu)
   itemExport.className = 'ctx-menu-item'
   itemExport.textContent = 'Export system objects'
-  itemExport.addEventListener('click', () => {
-    console.log('export')
+
+  let exportInProgress = false
+  itemExport.addEventListener('click', async(e) => {
+    e.preventDefault()
+    if (exportInProgress) return
+    exportInProgress = true
+
+    const { pgDump } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite-tools/dist/pg_dump.js')
+    const dump = await pgDump({ pg: dbSystem })
+
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(dump)
+    a.download = dump.name
+    a.click()
+    URL.revokeObjectURL(a.href)
+
+    exportInProgress = false
   })
   // const itemUserImport = mk(null, ctxMenu)
   // itemUserImport.className = 'ctx-menu-item'
@@ -234,11 +308,10 @@ sectionHeading.style.fontWeight = 'bold'
 const createTabManager = (target, mk, db, width) => {
 
   const tabsContainer = mk('tabs-container', target)
-
   tabsContainer.style.width = width
   const style = mk(null, tabsContainer, 'style')
   style.innerHTML = `
-    #tabs-panel {
+    #tabs-bar {
       display: flex;
       background: #f3f3f3;
     }
@@ -270,7 +343,7 @@ const createTabManager = (target, mk, db, width) => {
     }
   `
 
-  const tabsPanel = mk('tabs-panel', tabsContainer)
+  const tabsBar = mk('tabs-bar', tabsContainer)
   const tabsView = mk('tabs-view', tabsContainer)
   tabsView.style.height = window.innerHeight + 'px' 
   tabsView.style.overflow = 'scroll'
@@ -278,7 +351,7 @@ const createTabManager = (target, mk, db, width) => {
   let activeTab
 
   const openTab = (object) => {
-    const tab = mk(null, tabsPanel)
+    const tab = mk(null, tabsBar)
     tab.className = 'tab active'
     tab.setAttribute('object-id', object.id)
 
@@ -293,7 +366,7 @@ const createTabManager = (target, mk, db, width) => {
       let tabForActivation
 
       if (tab === activeTab.tab) {
-        const tabs = tabsPanel.children
+        const tabs = tabsBar.children
         const tabIndex = Array.from(tabs).indexOf(tab)
         const nextTab = tabIndex > 0 
           ? tabs[tabIndex - 1]
@@ -331,11 +404,8 @@ const createTabManager = (target, mk, db, width) => {
     pre.setAttribute('object-id', object.id)
 
     const editor = monaco.editor.create(pre, {
-      value: object.data.code,
-      language: 'javascript',
-      theme: 'vs-dark',
-      automaticLayout: true,
-      fontSize: 15
+      value: object.data.code, language: 'javascript',
+      theme: 'vs-dark', automaticLayout: true, fontSize: 15
     })
     const pos = openedObjects[object.id]
     if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
@@ -347,10 +417,7 @@ const createTabManager = (target, mk, db, width) => {
       objectManager.openObject(object, pos) //rename this name
       
       object.data.code = editor.getValue()
-      db.query(
-        `UPDATE objects SET data = $1 WHERE id = $2`,
-        [JSON.stringify(object.data), object.id]
-      )
+      systemObjectsRepository.updateObjectCode(object.data.code)
     })
 
     const tabForActivation = { tab, tabView }
@@ -383,20 +450,14 @@ const createTabManager = (target, mk, db, width) => {
     activeTab = tabForActivation
   }
 
-  const saveActiveTab = (id) => {
-    db.query(
-      `INSERT INTO kv (key, value) VALUES ($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      ['activeTabId', id]
-    )
-  }
+  const saveActiveTab = (id) => kvRepository.setKey('activeTabId', id)
 
   const restoreLastActiveTab = async () => {
     const { rows } = await db.query(`SELECT * FROM kv WHERE key = $1`, ['activeTabId'])
     if (!rows.length) return
 
     const [ { value } ] = rows
-    const tab = tabsPanel.querySelector(`[object-id="${value}"]`)
+    const tab = tabsBar.querySelector(`[object-id="${value}"]`)
     const tabView = tabsView.querySelector(`[object-id="${value}"]`)
 
     if (tab && tabView) {
@@ -408,7 +469,7 @@ const createTabManager = (target, mk, db, width) => {
 }
 
 const tabManagerWidth = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
-const tabManager = createTabManager(app, mk, db, tabManagerWidth)
+const tabManager = createTabManager(app, mk, dbUser, tabManagerWidth)
 
 const objectsView = mk('objects-view', app)
 objectsView.style.position = `absolute`
@@ -441,30 +502,32 @@ const runMainObject = async (x) => {
   const blob = new Blob([code], { type: 'application/javascript' })
   try {
     const m = (await import(URL.createObjectURL(blob)))
-    m.default({ o: object, db, objectBrowser, objectManager, tabManager, renderObjectName })
+    m.default({ o: object, objectBrowser, objectManager, tabManager, renderObjectName })
   } catch (e) {
     console.error(e)
   }
 }
 
-const processMainObject = async () => {
-  const { rows: objectsRows } = await db.query(`SELECT * FROM objects WHERE id = $1`, ['main']);
-  const mainObject = objectsRows[0]
-  if (!mainObject) {
-    console.log('need to import std data backup from backend')
-    return
-  }
+if (!await kvRepository.isExists()) {
+  await kvRepository.initTable()
+}
+
+//await objectManager.init(dbUser)
+
+if (await systemObjectsRepository.isExists()) {
+  const mainObject = await systemObjectsRepository.getById('main')
   await renderObjectName(mainObject, objectBrowser.systemSection)
-  await runMainObject({ object: mainObject, db, objectBrowser, objectManager, tabManager, renderObjectName })
+  //await runMainObject({ object: mainObject, dbSystem, objectBrowser, objectManager, tabManager, renderObjectName })
+} else {
+  console.log('need to import std data backup from backend')
 
-  return mainObject
+  //const mainObject = await processMainObject()
 }
 
-const mainObject = await processMainObject()
 
-const openedObjects = await objectManager.getOpenedObjects(mainObject)
-for (const objectId in openedObjects) {
-  if (objectId.trim() === 'main') {
-    tabManager.openTab(mainObject)
-  }
-}
+//const openedObjects = await objectManager.getOpenedObjects(mainObject)
+//for (const objectId in openedObjects) {
+//  if (objectId.trim() === 'main') {
+//    tabManager.openTab(mainObject)
+//  }
+//}
