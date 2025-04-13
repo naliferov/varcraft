@@ -103,7 +103,7 @@ x.s('fs', async (x) => {
     }
   })
 
-  await x.s('httpMkResp', async ({ statusCode = 200, mime, v, isBin }) => {
+  const httpMkResp = async ({ statusCode = 200, mime, v, isBin }) => {
     const send = (value, contentType) => {
       const headers = {}
       if (contentType) headers['content-type'] = contentType
@@ -117,28 +117,16 @@ x.s('fs', async (x) => {
     }
     if (typeof v === 'string') return send(v, mime ?? plain)
     return send('empty resp', plain)
-  })
+  }
 
   await x.s('getHtml', async (x) => {
     return {
-      v: `
-  <!DOCTYPE html>
-  <html>
-  <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  </head>
-  <body><script type="module" src="/index.js"></script></body>
-  </html>
-      `,
+      v: await x.p('fs', { get: { path: './index.html' } }),
       isHtml: true,
     }
   })
 
-  await x.s('httpGetBody', async (x) => {
-    const limitMb = x.limit || 12
-    const ctx = x.ctx
-
+  const httpGetBody = async (ctx, limitMb = 12) => {
     let limit = limitMb * 1024 * 1024
     const rq = ctx.rq
 
@@ -179,7 +167,7 @@ x.s('fs', async (x) => {
         resolve(msg)
       })
     })
-  })
+  }
 
 const httpHandler = async (x) => {
     const { rq } = x
@@ -192,47 +180,46 @@ const httpHandler = async (x) => {
     ctx.url.searchParams.forEach((v, k) => (ctx.query[k] = v))
 
     const r = await x.p('httpGetFile', { ctx })
-    if (r.fileNotFound) return await x.p('httpMkResp', { code: 404, v: 'File not found' })
-    else if (r.file) return await x.p('httpMkResp', { v: r.file, mime: r.mime, isBin: true })
+    if (r.fileNotFound) return httpMkResp({ code: 404, v: 'File not found' })
+    else if (r.file) return httpMkResp({ v: r.file, mime: r.mime, isBin: true })
 
-    let msg = await x.p('httpGetBody', { ctx })
+    let msg = await httpGetBody(ctx)
     if (!msg) msg = {}
-    if (msg.err) return await x.p('httpMkResp', { v: msg.err })
+    if (msg.err) return httpMkResp({ v: msg.err })
 
     if (msg.bin && msg.binMeta) {
         msg.event = msg.binMeta.event
         msg.data = { ...msg.binMeta, v: msg.bin }
     }
-
     if (Object.keys(msg).length < 1) {
         msg.event = 'getHtml'
     }
 
     const o = await x.p(msg.event, msg.data)
     if (!o) {
-        return await x.p('httpMkResp', { v: { defaultResponse: true } })
+        return httpMkResp({ v: { defaultResponse: true } })
     }
     if (o.isHtml) {
-        return await x.p('httpMkResp', { v: o.v, mime: 'text/html' })
+        return httpMkResp({ v: o.v, mime: 'text/html' })
     }
-    return await x.p('httpMkResp', { v: o })
+    return httpMkResp({ v: o })
 }
 
 const ctx = { filename: process.argv[1].split('/').at(-1) }
 const port = process.env.PORT || 3000
 const server = (await import('node:http')).createServer({ requestTimeout: 30000 })
 server.on('request', async (rq, rs) => {
-    rq.on('error', (e) => {
+  rq.on('error', (e) => {
     rq.destroy()
     console.log('request on error', e)
-    })
-    try {
+  })
+  try {
     const r = await x.p('httpHandler', { runtimeCtx: ctx, rq })
     rs.writeHead(r.statusCode, r.headers).end(r.value)
-    } catch (e) {
+  } catch (e) {
     const m = 'err in rqHandler'
     console.log(m, e)
     rs.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' }).end(m)
-    }
+  }
 })
 server.listen(port, () => console.log(`server start on port: [${port}]`))

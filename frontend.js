@@ -33,6 +33,8 @@ const mk = (id, target, tag = 'div') => {
   return el
 }
 
+const removeBadEscaping = str => str.replace(/\\+n/g, '\n')
+
 const app = mk('app', document.body)
 app.style.display = 'flex'
 
@@ -80,9 +82,10 @@ const baseRepository = {
     return rows.find(row => row.table_name === this.table)
   },
 }
+
 const createRepository = (child) => Object.assign(Object.create(baseRepository), child)
 
-const systemObjectsRepository = createRepository({
+const createObjectRepository = (child = {}) => createRepository({
   table: 'objects',
   async getObjects() {
     const { rows } = await this.db.query(`SELECT * FROM ${this.table}`)
@@ -91,7 +94,7 @@ const systemObjectsRepository = createRepository({
   async updateObjectData(objectId, data) {
     await this.db.query(`UPDATE ${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
   },
-  async getNextObjectsRecursive(objectId) {
+  async getNextObjects(objectId) {
     const iterateSql = `
       WITH RECURSIVE next_objects AS (
         SELECT o.* FROM objects o
@@ -100,24 +103,20 @@ const systemObjectsRepository = createRepository({
         SELECT o.* FROM objects o
         INNER JOIN next_objects no ON o.id = no.next_id
       )
-      SELECT * FROM next_objects;
+      SELECT * FROM next_objects
+      WHERE id != $1;
     `;
     return await this.db.query(iterateSql, [objectId])
-  }
+  },
+  ...child
 })
-systemObjectsRepository.init(dbSystem)
 
-const userObjectsRepository = createRepository({
-  table: 'objects',
-  async getObjects() {
-    const { rows } = await this.db.query(`SELECT * FROM ${this.table}`)
-    return rows
-  },
-  async updateObjectData(objectId, data) {
-    await this.db.query(`UPDATE ${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
-  },
-})
+const systemObjectsRepository = createObjectRepository()
+systemObjectsRepository.init(dbSystem)
+const userObjectsRepository = createObjectRepository()
 userObjectsRepository.init(dbUser)
+
+//const objects = await systemObjectsRepository.getObjects()
 
 const kvRepository = createRepository({
   table: 'kv',
@@ -244,6 +243,7 @@ ctxMenuBtn.addEventListener('click', (e) => {
   ctxMenu.style.position = 'absolute'
   ctxMenu.style.background = '#f3f3f3'
   ctxMenu.style.boxShadow = 'rgba(99, 99, 99, 0.2) 0px 2px 8px 0px'
+  ctxMenu.style.zIndex = '1000'
 
   const itemImport = mk(null, ctxMenu)
   itemImport.className = 'ctx-menu-item'
@@ -259,8 +259,17 @@ ctxMenuBtn.addEventListener('click', (e) => {
     const r = new FileReader()
     r.readAsText(file)
     r.onload = async() => {      
-      dbSystem.exec(r.result)
+      await dbSystem.exec(r.result)
+
+      //check this
+      const objects = await systemObjectsRepository.getObjects()
+      objects.forEach(async o => {
+        o.data.code = removeBadEscaping(o.data.code)
+        await systemObjectsRepository.updateObjectData(o.id, o.data)
+      })
+
       console.log('import complete')
+      document.location.reload()
     }
   })
 
@@ -414,7 +423,7 @@ const createTabManager = (target, mk, db, width) => {
     pre.className = 'object-code'
     pre.setAttribute('object-id', object.id)
 
-    const code = object.data.code.replace(/\\n/g, '\n')
+    const code = removeBadEscaping(object.data.code)
     const editor = monaco.editor.create(pre, {
       value: code, 
       language: 'javascript',
@@ -423,14 +432,15 @@ const createTabManager = (target, mk, db, width) => {
       fontSize: 15
     })
 
-    //const pos = openedObjects[object.id]
-    //if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
+    const openedObjects = objectManager.getOpenedObjects()
+    const pos = openedObjects[object.id]
+    if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
 
     editor.onDidChangeModelContent((e) => {
       if (!object.id) return
       
       const pos = editor.getPosition()
-      objectManager.openObject(object, pos) //rename this name
+      objectManager.openObject(object, pos) //rename this name?
       object.data.code = editor.getValue()
       systemObjectsRepository.updateObjectData(object.id, object.data)
     })
@@ -511,7 +521,7 @@ const runMainObject = async (x) => {
   const { object, objectBrowser, objectManager, tabManager, 
     renderObjectName, systemObjectsRepository, userObjectsRepository } = x
   const code = `export default async ($) => { 
-    ${object.data.code}
+    ${removeBadEscaping(object.data.code)}
   }`
   const blob = new Blob([code], { type: 'application/javascript' })
   try {
@@ -528,13 +538,13 @@ const runMainObject = async (x) => {
 if (!await kvRepository.isExists()) await kvRepository.initTable()
 await objectManager.init(dbUser)
 
-
 let mainObject
 if (await systemObjectsRepository.isExists()) {
   mainObject = await systemObjectsRepository.getById('main')
   await renderObjectName(mainObject, objectBrowser.systemSection)
   await runMainObject({ 
-    object: mainObject, dbSystem, objectBrowser, objectManager, tabManager, renderObjectName,
+    object: mainObject, objectBrowser, 
+    objectManager, tabManager, renderObjectName,
     systemObjectsRepository, userObjectsRepository
   })
 } else {
@@ -544,7 +554,6 @@ if (await systemObjectsRepository.isExists()) {
 }
 
 //actually objects opened by tabManager
-const openedObjects = await objectManager.getOpenedObjects(mainObject)
-for (const objectId in openedObjects) {
- if (objectId.trim() === 'main') tabManager.openTab(mainObject)
-}
+const openedObjects = await objectManager.getOpenedObjects()
+const isMainFound = Object.keys(openedObjects).find(id => id.trim() === 'main')
+if (isMainFound) tabManager.openTab(mainObject) 

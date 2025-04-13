@@ -1,4 +1,4 @@
-const CACHE_NAME = 'varcraft-cache-v37'
+const CACHE_NAME = 'varcraft-cache-v39'
 const urlsToCache = [
   '/',
   'frontend.js',
@@ -8,37 +8,34 @@ const urlsToCache = [
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-    .then(cache => cache.addAll(urlsToCache))
-    .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
   )
   console.log('sw installed')
 })
 
 self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        if (response) return response
+  const promise = caches.match(event.request)
+    .then(response => {
+      if (response) return response
 
-        return fetch(event.request).then(
-          (netResponse) => {
-            if (!netResponse) return netResponse
+      return fetch(event.request).then(
+        (netResponse) => {
+          if (!netResponse) return netResponse
 
-            console.log('cache request', event.request.url)
-            const responseToCache = netResponse.clone()
-            caches.open(CACHE_NAME).then(cache => {
-                cache.put(event.request, responseToCache)
-            })
-            return netResponse
-          }
-        )
-      })
-      .catch(() => {
-        console.log('catch')
-        return caches.match('/offline.html')
-      })
-  )
+          console.log('cache request', event.request.url)
+          const responseToCache = netResponse.clone()
+          caches.open(CACHE_NAME).then(cache => {
+              cache.put(event.request, responseToCache)
+          })
+          return netResponse
+        }
+      )
+    })
+    .catch(() => {
+      console.log('catch')
+      return caches.match('/offline.html')
+    })
+  event.respondWith(promise)
 })
 
 self.addEventListener('activate', event => {

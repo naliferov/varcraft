@@ -1,4 +1,4 @@
 # varcraft
-🧙‍♂️ Javascript sandbox
+🧙‍♂️ Javascript development environment for small projects.
 
-Edit objects contain javascript code and execute it in sandbox.
+Make apps editing objects contain javascript and execute it.
