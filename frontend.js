@@ -33,7 +33,7 @@ const mk = (id, target, tag = 'div') => {
   return el
 }
 
-const removeBadEscaping = str => str.replace(/\\+n/g, '\n')
+const removeExtraEscaping = str => str.replace(/\\+n/g, '\n')
 
 const app = mk('app', document.body)
 app.style.display = 'flex'
@@ -85,14 +85,14 @@ const baseRepository = {
 
 const createRepository = (child) => Object.assign(Object.create(baseRepository), child)
 
-const createObjectRepository = (child = {}) => createRepository({
+const createObjectsRepository = (child = {}) => createRepository({
   table: 'objects',
   async getObjects() {
-    const { rows } = await this.db.query(`SELECT * FROM ${this.table}`)
+    const { rows } = await this.db.query(`SELECT * FROM public.${this.table}`)
     return rows
   },
   async updateObjectData(objectId, data) {
-    await this.db.query(`UPDATE ${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
+    await this.db.query(`UPDATE public.${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
   },
   async getNextObjects(objectId) {
     const iterateSql = `
@@ -111,12 +111,10 @@ const createObjectRepository = (child = {}) => createRepository({
   ...child
 })
 
-const systemObjectsRepository = createObjectRepository()
+const systemObjectsRepository = createObjectsRepository()
 systemObjectsRepository.init(dbSystem)
-const userObjectsRepository = createObjectRepository()
+const userObjectsRepository = createObjectsRepository()
 userObjectsRepository.init(dbUser)
-
-//const objects = await systemObjectsRepository.getObjects()
 
 const kvRepository = createRepository({
   table: 'kv',
@@ -245,46 +243,45 @@ ctxMenuBtn.addEventListener('click', (e) => {
   ctxMenu.style.boxShadow = 'rgba(99, 99, 99, 0.2) 0px 2px 8px 0px'
   ctxMenu.style.zIndex = '1000'
 
+  const importDump = async (db, file) => {
+    const r = new FileReader()
+    r.readAsText(file)
+    r.onload = async() => {      
+      await db.exec(r.result)
+
+      const objects = await systemObjectsRepository.getObjects()
+      for (let i = 0; i < objects.length; i++) {
+        const o = objects[i]
+        if (!o.data.code) continue
+        o.data.code = removeExtraEscaping(o.data.code)
+        await systemObjectsRepository.updateObjectData(o.id, o.data)
+      }
+      console.log('import complete')
+      document.location.reload()
+    }
+  }
+
   const itemImport = mk(null, ctxMenu)
   itemImport.className = 'ctx-menu-item'
   itemImport.textContent = 'Import system objects'
 
-  const fInput = mk(null, itemImport, 'input')
+  let fInput = mk(null, itemImport, 'input')
   fInput.type = 'file'
   fInput.style.marginLeft = '10px'
-  fInput.addEventListener('change', (e) => {
+  fInput.addEventListener('change', async (e) => {
     const file = e.target.files[0]
-    if (!file) return
-
-    const r = new FileReader()
-    r.readAsText(file)
-    r.onload = async() => {      
-      await dbSystem.exec(r.result)
-
-      //check this
-      const objects = await systemObjectsRepository.getObjects()
-      objects.forEach(async o => {
-        o.data.code = removeBadEscaping(o.data.code)
-        await systemObjectsRepository.updateObjectData(o.id, o.data)
-      })
-
-      console.log('import complete')
-      document.location.reload()
-    }
+    if (!file) return    
+    await importDump(dbSystem, file)
   })
 
-  const itemExport = mk(null, ctxMenu)
-  itemExport.className = 'ctx-menu-item'
-  itemExport.textContent = 'Export system objects'
+  let inProgress = false
 
-  let exportInProgress = false
-  itemExport.addEventListener('click', async(e) => {
-    e.preventDefault()
-    if (exportInProgress) return
-    exportInProgress = true
+  const exportDump = async (db) => {
+    if (inProgress) return
+    inProgress = true
 
     const { pgDump } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite-tools/dist/pg_dump.js')
-    const dump = await pgDump({ pg: dbSystem })
+    const dump = await pgDump({ pg: db })
 
     const a = document.createElement('a')
     a.href = URL.createObjectURL(dump)
@@ -292,20 +289,44 @@ ctxMenuBtn.addEventListener('click', (e) => {
     a.click()
     URL.revokeObjectURL(a.href)
 
-    exportInProgress = false
+    inProgress = false
+  }
+
+  const itemExport = mk(null, ctxMenu)
+  itemExport.className = 'ctx-menu-item'
+  itemExport.textContent = 'Export system objects'
+
+  itemExport.addEventListener('click', async (e) => {
+    e.preventDefault()
+    await exportDump(dbSystem)
   })
-  // const itemUserImport = mk(null, ctxMenu)
-  // itemUserImport.className = 'ctx-menu-item'
-  // itemUserImport.textContent = 'Import user objects'
-  // itemUserImport.addEventListener('click', () => {
-  //   console.log('import')
-  // })
-  // const itemUserExport = mk(null, ctxMenu)
-  // itemUserExport.className = 'ctx-menu-item'
-  // itemUserExport.textContent = 'Export user objects'
-  // itemUserExport.addEventListener('click', () => {
-  //   console.log('export')
-  // })
+
+  const itemUserImport = mk(null, ctxMenu)
+  itemUserImport.className = 'ctx-menu-item'
+  itemUserImport.textContent = 'Import user objects'
+  itemUserImport.addEventListener('click', async (e) => {
+    e.preventDefault()
+    const file = e.target.files[0]
+    if (!file) return
+    await importDump(dbUser, file)
+  })
+
+  fInput = mk(null, itemUserImport, 'input')
+  fInput.type = 'file'
+  fInput.style.marginLeft = '10px'
+  fInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0]
+    if (!file) return    
+    await importDump(dbUser, file)
+  })
+
+  const itemUserExport = mk(null, ctxMenu)
+  itemUserExport.className = 'ctx-menu-item'
+  itemUserExport.textContent = 'Export user objects'
+  itemUserExport.addEventListener('click', async (e) => {
+    //e.preventDefault()
+    //await exportDump(dbUser)
+  })
 })
 
 const objectBrowserHeading = mk(0, objectBrowserHeader)
@@ -423,7 +444,7 @@ const createTabManager = (target, mk, db, width) => {
     pre.className = 'object-code'
     pre.setAttribute('object-id', object.id)
 
-    const code = removeBadEscaping(object.data.code)
+    const code = removeExtraEscaping(object.data.code)
     const editor = monaco.editor.create(pre, {
       value: code, 
       language: 'javascript',
@@ -521,7 +542,7 @@ const runMainObject = async (x) => {
   const { object, objectBrowser, objectManager, tabManager, 
     renderObjectName, systemObjectsRepository, userObjectsRepository } = x
   const code = `export default async ($) => { 
-    ${removeBadEscaping(object.data.code)}
+    ${removeExtraEscaping(object.data.code)}
   }`
   const blob = new Blob([code], { type: 'application/javascript' })
   try {
