@@ -65,6 +65,20 @@ const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
 const dbSystem = await createDb('db-system')
 const dbUser = await createDb('db-user')
 
+const dbGetTables = async (db) => {
+  const { rows } = await db.query(`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+  `)
+  return rows.map(row => row.table_name)
+}
+const dbDropTables = async (db) => {
+  const tables = await dbGetTables(db)
+  for (const table of tables) {
+    await db.query(`DROP TABLE IF EXISTS ${table}`)
+  }
+}
+
 const baseRepository = {
   db: null,
   table: null,
@@ -76,10 +90,8 @@ const baseRepository = {
     return rows[0]
   },
   async isExists() {
-    const { rows } = await this.db.query(`
-      SELECT * FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`)
-    return rows.find(row => row.table_name === this.table)
+    const tables = await dbGetTables(this.db)
+    return tables.includes(this.table)
   },
 }
 
@@ -141,31 +153,31 @@ const kvRepository = createRepository({
 kvRepository.init(dbUser)
 
 const objectManager = {
-  openedObjects: {},
+  openedObjectsIds: {},
   async init(db) {
     this.db = db
-    const value = await kvRepository.getKey('openedObjects')
+    const value = await kvRepository.getKey('openedObjectsIds')
     if (value) {
-      this.openedObjects = JSON.parse(value)
+      this.openedObjectsIds = JSON.parse(value)
     }
   },
-  getOpenedObjects() {
-    return this.openedObjects
+  getOpenedObjectsIds() {
+    return this.openedObjectsIds
   },
   isObjectOpened(objectId) {
-    return Boolean(this.openedObjects[objectId])
+    return Boolean(this.openedObjectsIds[objectId])
   },
   openObject(object, pos) {
-    this.openedObjects[object.id] = pos ? pos : 1
+    this.openedObjectsIds[object.id] = pos ? pos : 1
     this.saveOpenedObjects()
   },
   openObjectWithObject(object, otherObject) {},
   closeObject(object) {
-    delete this.openedObjects[object.id]
+    delete this.openedObjectsIds[object.id]
     this.saveOpenedObjects()
   },
   saveOpenedObjects() {
-    kvRepository.setKey('openedObjects', JSON.stringify(this.openedObjects))
+    kvRepository.setKey('openedObjectsIds', JSON.stringify(this.openedObjectsIds))
   },
 }
 
@@ -261,21 +273,6 @@ ctxMenuBtn.addEventListener('click', (e) => {
     }
   }
 
-  const itemImport = mk(null, ctxMenu)
-  itemImport.className = 'ctx-menu-item'
-  itemImport.textContent = 'Import system objects'
-
-  let fInput = mk(null, itemImport, 'input')
-  fInput.type = 'file'
-  fInput.style.marginLeft = '10px'
-  fInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0]
-    if (!file) return    
-    await importDump(dbSystem, file)
-  })
-
-  let inProgress = false
-
   const exportDump = async (db) => {
     if (inProgress) return
     inProgress = true
@@ -292,24 +289,31 @@ ctxMenuBtn.addEventListener('click', (e) => {
     inProgress = false
   }
 
-  const itemExport = mk(null, ctxMenu)
-  itemExport.className = 'ctx-menu-item'
-  itemExport.textContent = 'Export system objects'
+  const itemSystemImport = mk(null, ctxMenu)
+  itemSystemImport.className = 'ctx-menu-item'
+  itemSystemImport.textContent = 'Import system objects'
 
-  itemExport.addEventListener('click', async (e) => {
-    e.preventDefault()
-    await exportDump(dbSystem)
+  let fInput = mk(null, itemSystemImport, 'input')
+  fInput.type = 'file'
+  fInput.style.marginLeft = '10px'
+  fInput.addEventListener('change', async(e) => {
+    const file = e.target.files[0]
+    if (!file) return    
+    importDump(dbSystem, file)
+  })
+
+  let inProgress = false
+
+  const itemSystemExport = mk(null, ctxMenu)
+  itemSystemExport.className = 'ctx-menu-item'
+  itemSystemExport.textContent = 'Export system objects'
+  itemSystemExport.addEventListener('click', async () => {
+    exportDump(dbSystem)
   })
 
   const itemUserImport = mk(null, ctxMenu)
   itemUserImport.className = 'ctx-menu-item'
   itemUserImport.textContent = 'Import user objects'
-  itemUserImport.addEventListener('click', async (e) => {
-    e.preventDefault()
-    const file = e.target.files[0]
-    if (!file) return
-    await importDump(dbUser, file)
-  })
 
   fInput = mk(null, itemUserImport, 'input')
   fInput.type = 'file'
@@ -317,15 +321,16 @@ ctxMenuBtn.addEventListener('click', (e) => {
   fInput.addEventListener('change', async (e) => {
     const file = e.target.files[0]
     if (!file) return    
+    await dbDropTables(dbUser)
     await importDump(dbUser, file)
   })
 
   const itemUserExport = mk(null, ctxMenu)
   itemUserExport.className = 'ctx-menu-item'
   itemUserExport.textContent = 'Export user objects'
-  itemUserExport.addEventListener('click', async (e) => {
-    //e.preventDefault()
-    //await exportDump(dbUser)
+  itemUserExport.addEventListener('click', (e) => {
+    e.preventDefault()
+    exportDump(dbUser)
   })
 })
 
@@ -346,7 +351,7 @@ sectionHeading = mk(0, objectBrowser.userSection)
 sectionHeading.textContent = 'User:'
 sectionHeading.style.fontWeight = 'bold'
 
-const createTabManager = (target, mk, db, width) => {
+const createTabManager = (target, mk, width) => {
 
   const tabsContainer = mk('tabs-container', target)
   tabsContainer.style.width = width
@@ -383,10 +388,11 @@ const createTabManager = (target, mk, db, width) => {
       stroke: currentColor;
     }
   `
-
+  
   const tabsBar = mk('tabs-bar', tabsContainer)
+  const tabsBarHeight = 35
   const tabsView = mk('tabs-view', tabsContainer)
-  tabsView.style.height = window.innerHeight + 'px' 
+  tabsView.style.height = window.innerHeight - tabsBarHeight + 'px' 
   tabsView.style.overflow = 'scroll'
 
   let activeTab
@@ -440,7 +446,7 @@ const createTabManager = (target, mk, db, width) => {
     tabView.setAttribute('object-id', object.id)
 
     const pre = mk(null, tabView, 'div')
-    pre.style.height = '900px'
+    pre.style.height = window.innerHeight - tabsBarHeight + 'px' 
     pre.className = 'object-code'
     pre.setAttribute('object-id', object.id)
 
@@ -453,8 +459,8 @@ const createTabManager = (target, mk, db, width) => {
       fontSize: 15
     })
 
-    const openedObjects = objectManager.getOpenedObjects()
-    const pos = openedObjects[object.id]
+    const openedObjectsIds = objectManager.getOpenedObjectsIds()
+    const pos = openedObjectsIds[object.id]
     if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
 
     editor.onDidChangeModelContent((e) => {
@@ -497,6 +503,7 @@ const createTabManager = (target, mk, db, width) => {
   }
 
   const saveActiveTab = (id) => kvRepository.setKey('activeTabId', id)
+
   const restoreLastActiveTab = async () => {
     const value = await kvRepository.getKey('activeTabId')
     if (!value) return
@@ -513,7 +520,7 @@ const createTabManager = (target, mk, db, width) => {
 }
 
 const tabManagerWidth = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
-const tabManager = createTabManager(app, mk, dbUser, tabManagerWidth)
+const tabManager = createTabManager(app, mk, tabManagerWidth)
 
 const objectsView = mk('objects-view', app)
 objectsView.style.position = `absolute`
@@ -525,7 +532,7 @@ const renderObjectName = (object, target) => {
   const name = mk(null, dom)
   name.innerText = object.data.name
   name.addEventListener('click', async (e) => {
-    if (objectManager.openedObjects[object.id]) return
+    if (objectManager.isObjectOpened(object.id)) return
     tabManager.openTab(object)
     tabManager.saveActiveTab(object.id)
     objectManager.openObject(object)
@@ -575,6 +582,6 @@ if (await systemObjectsRepository.isExists()) {
 }
 
 //actually objects opened by tabManager
-const openedObjects = await objectManager.getOpenedObjects()
-const isMainFound = Object.keys(openedObjects).find(id => id.trim() === 'main')
-if (isMainFound) tabManager.openTab(mainObject) 
+const openedObjectsIds = await objectManager.getOpenedObjectsIds()
+const isMainFound = Object.keys(openedObjectsIds).find(id => id.trim() === 'main')
+if (isMainFound) tabManager.openTab(mainObject)
