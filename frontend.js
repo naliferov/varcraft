@@ -115,11 +115,12 @@ ctxMenuBtn.addEventListener('click', (e) => {
     .ctx-menu {
       position: absolute;
       background: #f3f3f3;
-      box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
+      color: #616161;
+      font-family: Roboto, sans-serif;
+      box-shadow: rgba(2, 0, 0, 0.35) 0px 5px 15px;
     }
     .ctx-menu-item {
-      padding: 5px 0;
-      cursor: pointer;
+      padding: 5px;
     }
     .ctx-menu-item:hover {
       background:rgb(221, 221, 221);
@@ -127,9 +128,7 @@ ctxMenuBtn.addEventListener('click', (e) => {
   `
   ctxMenu.style.left = `${ctxMenuBtnRect.left}px`
   ctxMenu.style.top = `${ctxMenuBtnRect.top + ctxMenuBtnRect.height}px`
-  ctxMenu.style.position = 'absolute'
-  ctxMenu.style.background = '#f3f3f3'
-  ctxMenu.style.boxShadow = 'rgba(99, 99, 99, 0.2) 0px 2px 8px 0px'
+  ctxMenu.style.cursor = 'pointer'
   ctxMenu.style.zIndex = '1000'
 
   const importDump = async (db, file) => {
@@ -494,18 +493,7 @@ const kvRepository = createRepository({
 kvRepository.init(dbUser)
 
 const objectManager = {
-  objects: new Map(),
   openedObjectsIds: {},
-
-  set(object, source = '') {
-    this.objects.set(object.id, object)
-  },
-  get(objectId) {
-    return this.objects.get(objectId)
-  },
-  delete(objectId) {
-    this.objects.delete(objectId)
-  },
   async init(dbSystem, dbUser) {
     this.dbSystem = dbSystem
     this.dbUser = dbUser
@@ -538,10 +526,11 @@ const objectManager = {
 const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
   dom.className = 'object'
+  dom.style.cursor = 'pointer'
 
-  const name = mk(null, dom)
-  name.innerText = object.data.name
-  name.addEventListener('click', async (e) => {
+  dom.name = mk(null, dom)
+  dom.name.innerText = object.data.name
+  dom.name.addEventListener('click', async (e) => {
     if (objectManager.isObjectOpened(object.id)) return
     tabManager.openTab(object)
     tabManager.saveActiveTab(object.id)
