@@ -58,128 +58,7 @@ requireScript.onload = () => {
     require(['vs/editor/editor.main'], editorIsReadyResolve)
 }
 head.append(requireScript)
-await editorIsReady;
-
-const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
-const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
-const dbSystem = await createDb('db-system')
-const dbUser = await createDb('db-user')
-
-const dbGetTables = async (db) => {
-  const { rows } = await db.query(`
-    SELECT table_name FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-  `)
-  return rows.map(row => row.table_name)
-}
-const dbDropTables = async (db) => {
-  const tables = await dbGetTables(db)
-  for (const table of tables) {
-    await db.query(`DROP TABLE IF EXISTS ${table}`)
-  }
-}
-
-const baseRepository = {
-  db: null,
-  table: null,
-  init(db) { 
-    this.db = db
-  },
-  async getById(id) {
-    const { rows } = await this.db.query(`SELECT * FROM ${this.table} WHERE id = $1`, [id])
-    return rows[0]
-  },
-  async isExists() {
-    const tables = await dbGetTables(this.db)
-    return tables.includes(this.table)
-  },
-}
-
-const createRepository = (child) => Object.assign(Object.create(baseRepository), child)
-
-const createObjectsRepository = (child = {}) => createRepository({
-  table: 'objects',
-  async getObjects() {
-    const { rows } = await this.db.query(`SELECT * FROM public.${this.table}`)
-    return rows
-  },
-  async updateObjectData(objectId, data) {
-    await this.db.query(`UPDATE public.${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
-  },
-  async getNextObjects(objectId) {
-    const iterateSql = `
-      WITH RECURSIVE next_objects AS (
-        SELECT o.* FROM objects o
-        WHERE o.id = $1
-        UNION ALL
-        SELECT o.* FROM objects o
-        INNER JOIN next_objects no ON o.id = no.next_id
-      )
-      SELECT * FROM next_objects
-      WHERE id != $1;
-    `;
-    return await this.db.query(iterateSql, [objectId])
-  },
-  ...child
-})
-
-const systemObjectsRepository = createObjectsRepository()
-systemObjectsRepository.init(dbSystem)
-const userObjectsRepository = createObjectsRepository()
-userObjectsRepository.init(dbUser)
-
-const kvRepository = createRepository({
-  table: 'kv',
-  async initTable() {
-    await this.db.query(`
-      CREATE TABLE IF NOT EXISTS ${this.table} (
-        key character varying(26) NOT NULL PRIMARY KEY,
-        value text
-      )
-    `)
-  },
-  async getKey(key) {
-    const { rows } = await this.db.query(`SELECT * FROM ${this.table} WHERE key = $1`, [key])
-    if (rows.length > 0) {
-      const [ { value } ] = rows
-      return value
-    }
-  },
-  async setKey(key, value) {
-    await this.db.query(`INSERT INTO ${this.table} (key, value) VALUES ($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value])
-  }
-})
-kvRepository.init(dbUser)
-
-const objectManager = {
-  openedObjectsIds: {},
-  async init(db) {
-    this.db = db
-    const value = await kvRepository.getKey('openedObjectsIds')
-    if (value) {
-      this.openedObjectsIds = JSON.parse(value)
-    }
-  },
-  getOpenedObjectsIds() {
-    return this.openedObjectsIds
-  },
-  isObjectOpened(objectId) {
-    return Boolean(this.openedObjectsIds[objectId])
-  },
-  openObject(object, pos) {
-    this.openedObjectsIds[object.id] = pos ? pos : 1
-    this.saveOpenedObjects()
-  },
-  openObjectWithObject(object, otherObject) {},
-  closeObject(object) {
-    delete this.openedObjectsIds[object.id]
-    this.saveOpenedObjects()
-  },
-  saveOpenedObjects() {
-    kvRepository.setKey('openedObjectsIds', JSON.stringify(this.openedObjectsIds))
-  },
-}
+await editorIsReady
 
 const objectBrowserWidth = 250
 const objectBrowserPadding = 8
@@ -211,12 +90,12 @@ style.textContent = `
     cursor: pointer;
   }
 `
-objectBrowser.appendChild(style)
 
 const objectBrowserHeader = mk(0, objectBrowser)
 objectBrowserHeader.className = 'object-browser-header'
 mk(0, objectBrowser, 'br')
 
+let ctxMenu
 const ctxMenuBtn = mk('.ctx-menu-btn', objectBrowserHeader)
 ctxMenuBtn.innerHTML = `
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6">
@@ -224,8 +103,6 @@ ctxMenuBtn.innerHTML = `
   </svg>
 `
 const ctxMenuBtnRect = ctxMenuBtn.getBoundingClientRect()
-let ctxMenu
-
 ctxMenuBtn.addEventListener('click', (e) => {
   if (ctxMenu) {
     ctxMenu.remove()
@@ -402,12 +279,12 @@ const createTabManager = (target, mk, width) => {
     tab.className = 'tab active'
     tab.setAttribute('object-id', object.id)
 
-    const tabName = mk(null, tab)
-    tabName.className = 'tab-name'
-    tabName.innerText = object.data.name
+    tab.name = mk(null, tab)
+    tab.name.className = 'tab-name'
+    tab.name.innerText = object.data.name
     
-    const closeTabBtn = mk('close-tab-btn', tab)
-    closeTabBtn.addEventListener('click', (e) => {
+    tab.closeBtn = mk('close-tab-btn', tab)
+    tab.closeBtn.addEventListener('click', (e) => {
       e.stopPropagation()
 
       let tabForActivation
@@ -422,33 +299,31 @@ const createTabManager = (target, mk, width) => {
         if (nextTab) {
           tabForActivation = { 
             tab: nextTab,
-            tabView: tabsView.querySelector(`[object-id="${nextTab.getAttribute('object-id')}"]`) 
+            tabView: nextTab.view 
           }
-        } 
+        }
       }
 
-      closeTab({ tab, tabView })
-      objectManager.closeObject(object)
+      closeTab({ tab, tabView: tab.view })
+      //todo add second param as source which opened object before, in this case it's tabManager
+      objectManager.closeObject(object, 'tabManager')
 
       if (tabForActivation) {
         activateTab(tabForActivation)
         saveActiveTab(tabForActivation.tab.getAttribute('object-id'))
       }
     })
-    closeTabBtn.innerHTML += `
+    tab.closeBtn.innerHTML += `
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"></path>
       </svg>
     `
-    
-    const tabView = mk(null, tabsView)
-    tabView.className = 'tab-view'
-    tabView.setAttribute('object-id', object.id)
+    tab.view = mk(null, tabsView)
+    tab.view.className = 'tab-view'
 
-    const pre = mk(null, tabView, 'div')
+    const pre = mk(null, tab.view, 'div')
     pre.style.height = window.innerHeight - tabsBarHeight + 'px' 
     pre.className = 'object-code'
-    pre.setAttribute('object-id', object.id)
 
     const code = removeExtraEscaping(object.data.code)
     const editor = monaco.editor.create(pre, {
@@ -459,8 +334,8 @@ const createTabManager = (target, mk, width) => {
       fontSize: 15
     })
 
-    const openedObjectsIds = objectManager.getOpenedObjectsIds()
-    const pos = openedObjectsIds[object.id]
+    const openedObjects = objectManager.getOpenedObjects()
+    const pos = openedObjects[object.id]
     if (pos && typeof pos === 'object') editor.revealPositionInCenter(pos)
 
     editor.onDidChangeModelContent((e) => {
@@ -472,7 +347,7 @@ const createTabManager = (target, mk, width) => {
       systemObjectsRepository.updateObjectData(object.id, object.data)
     })
 
-    const tabForActivation = { tab, tabView }
+    const tabForActivation = { tab, tabView: tab.view }
     tab.addEventListener('click', () => {
       activateTab(tabForActivation)
       saveActiveTab(object.id)
@@ -509,7 +384,7 @@ const createTabManager = (target, mk, width) => {
     if (!value) return
 
     const tab = tabsBar.querySelector(`[object-id="${value}"]`)
-    const tabView = tabsView.querySelector(`[object-id="${value}"]`)
+    const tabView = tab.view
 
     if (tab && tabView) {
       activateTab({ tab, tabView })
@@ -522,8 +397,143 @@ const createTabManager = (target, mk, width) => {
 const tabManagerWidth = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
 const tabManager = createTabManager(app, mk, tabManagerWidth)
 
-const objectsView = mk('objects-view', app)
-objectsView.style.position = `absolute`
+//const objectsView = mk('objects-view', app)
+
+
+
+const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
+const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
+const dbSystem = await createDb('db-system')
+const dbUser = await createDb('db-user')
+
+const dbGetTables = async (db) => {
+  const { rows } = await db.query(`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+  `)
+  return rows.map(row => row.table_name)
+}
+const dbDropTables = async (db) => {
+  const tables = await dbGetTables(db)
+  for (const table of tables) {
+    await db.query(`DROP TABLE IF EXISTS ${table}`)
+  }
+}
+
+const baseRepository = {
+  db: null,
+  table: null,
+  init(db) { 
+    this.db = db
+  },
+  async getById(id) {
+    const { rows } = await this.db.query(`SELECT * FROM ${this.table} WHERE id = $1`, [id])
+    return rows[0]
+  },
+  async isExists() {
+    const tables = await dbGetTables(this.db)
+    return tables.includes(this.table)
+  },
+}
+
+const createRepository = (child) => Object.assign(Object.create(baseRepository), child)
+
+const createObjectsRepository = (child = {}) => createRepository({
+  table: 'objects',
+  async getObjects() {
+    const { rows } = await this.db.query(`SELECT * FROM public.${this.table}`)
+    return rows
+  },
+  async updateObjectData(objectId, data) {
+    await this.db.query(`UPDATE public.${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
+  },
+  async getNextObjects(objectId) {
+    const iterateSql = `
+      WITH RECURSIVE next_objects AS (
+        SELECT o.* FROM objects o
+        WHERE o.id = $1
+        UNION ALL
+        SELECT o.* FROM objects o
+        INNER JOIN next_objects no ON o.id = no.next_id
+      )
+      SELECT * FROM next_objects
+      WHERE id != $1;
+    `;
+    return await this.db.query(iterateSql, [objectId])
+  },
+  ...child
+})
+
+const systemObjectsRepository = createObjectsRepository()
+systemObjectsRepository.init(dbSystem)
+const userObjectsRepository = createObjectsRepository()
+userObjectsRepository.init(dbUser)
+
+const kvRepository = createRepository({
+  table: 'kv',
+  async initTable() {
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS ${this.table} (
+        key character varying(26) NOT NULL PRIMARY KEY,
+        value text
+      )
+    `)
+  },
+  async getKey(key) {
+    const { rows } = await this.db.query(`SELECT * FROM ${this.table} WHERE key = $1`, [key])
+    if (rows.length > 0) {
+      const [ { value } ] = rows
+      return value
+    }
+  },
+  async setKey(key, value) {
+    await this.db.query(`INSERT INTO ${this.table} (key, value) VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value])
+  }
+})
+kvRepository.init(dbUser)
+
+const objectManager = {
+  objects: new Map(),
+  openedObjectsIds: {},
+
+  set(object, source = '') {
+    this.objects.set(object.id, object)
+  },
+  get(objectId) {
+    return this.objects.get(objectId)
+  },
+  delete(objectId) {
+    this.objects.delete(objectId)
+  },
+  async init(dbSystem, dbUser) {
+    this.dbSystem = dbSystem
+    this.dbUser = dbUser
+
+    const value = await kvRepository.getKey('openedObjectsIds')
+    if (value) {
+      this.openedObjectsIds = JSON.parse(value)
+    }
+  },
+  getOpenedObjects() {
+    return this.openedObjectsIds
+  },
+  isObjectOpened(objectId) {
+    return Boolean(this.openedObjectsIds[objectId])
+  },
+  openObject(object, pos) {
+    this.openedObjectsIds[object.id] = pos ? pos : 1
+    this.saveOpenedObjects()
+  },
+  openObjectWithObject(object, otherObject) {},
+  closeObject(object) {
+    delete this.openedObjectsIds[object.id]
+    this.saveOpenedObjects()
+  },
+  saveOpenedObjects() {
+    kvRepository.setKey('openedObjectsIds', JSON.stringify(this.openedObjectsIds))
+  },
+}
 
 const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
@@ -545,7 +555,7 @@ const renderObjectName = (object, target) => {
   return { children }
 }
 
-const runMainObject = async (x) => {
+const runObjectCode = async (x) => {
   const { object, objectBrowser, objectManager, tabManager, 
     renderObjectName, systemObjectsRepository, userObjectsRepository } = x
   const code = `export default async ($) => { 
@@ -563,14 +573,15 @@ const runMainObject = async (x) => {
   }
 }
 
+
 if (!await kvRepository.isExists()) await kvRepository.initTable()
-await objectManager.init(dbUser)
+await objectManager.init(dbSystem, dbUser)
 
 let mainObject
 if (await systemObjectsRepository.isExists()) {
   mainObject = await systemObjectsRepository.getById('main')
   await renderObjectName(mainObject, objectBrowser.systemSection)
-  await runMainObject({ 
+  await runObjectCode({ 
     object: mainObject, objectBrowser, 
     objectManager, tabManager, renderObjectName,
     systemObjectsRepository, userObjectsRepository
@@ -582,6 +593,6 @@ if (await systemObjectsRepository.isExists()) {
 }
 
 //actually objects opened by tabManager
-const openedObjectsIds = await objectManager.getOpenedObjectsIds()
-const isMainFound = Object.keys(openedObjectsIds).find(id => id.trim() === 'main')
+const openedObjects = await objectManager.getOpenedObjects()
+const isMainFound = Object.keys(openedObjects).find(id => id.trim() === 'main')
 if (isMainFound) tabManager.openTab(mainObject)
