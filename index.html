@@ -151,7 +151,7 @@ opListBtn.addEventListener('click', (e) => {
         const o = objects[i]
         if (!o.data.code) continue
         o.data.code = removeExtraEscaping(o.data.code)
-        await systemObjectsRepository.updateObjectData(o.id, o.data)
+        await systemObjectsRepository.setObject(o.id, o)
       }
       console.log('import complete')
       document.location.reload()
@@ -348,7 +348,8 @@ const createTabManager = (target, mk, width) => {
       const pos = editor.getPosition()
       objectManager.openObject(object, pos)
       object.data.code = editor.getValue()
-      systemObjectsRepository.updateObjectData(object.id, object.data)
+
+      systemObjectsRepository.setObject(object.id, object)
     })
 
     const tabForActivation = { tab, tabView: tab.view }
@@ -443,6 +444,14 @@ class IndexedDb {
       rq.onerror = () => reject(rq.error)
     })
   }
+  async getAll(x) {
+    const { storeName = 'default' } = x
+    return new Promise((resolve, reject) => {
+      const rq = this.db.transaction(storeName, 'readonly').objectStore(storeName).getAll()
+      rq.onsuccess = () => resolve(rq.result)
+      rq.onerror = () => reject(rq.error)
+    })
+  }
   async del(x) {
     const { storeName = 'default', id } = x
 
@@ -454,10 +463,15 @@ class IndexedDb {
   }
 }
 
-const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
-const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
-const dbSystem = await createDb('db-system')
-const dbUser = await createDb('db-user')
+//const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
+//const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
+const dbSystem = null
+const dbUser = null
+
+const idbSys = new IndexedDb()
+await idbSys.open('sys', ['objects'])
+const idbUser = new IndexedDb()
+await idbUser.open('user', ['objects', 'kv'])
 
 const dbGetTables = async (db) => {
   const { rows } = await db.query(`
@@ -475,13 +489,14 @@ const dbDropTables = async (db) => {
 
 const baseRepository = {
   db: null,
+  idb: null,
   table: null,
-  init(db) { 
+  init(db, idb) { 
     this.db = db
+    this.idb = idb
   },
   async getById(id) {
-    const { rows } = await this.db.query(`SELECT * FROM ${this.table} WHERE id = $1`, [id])
-    return rows[0]
+    return await this.idb.get({ storeName: this.table, id })
   },
   async isExists() {
     const tables = await dbGetTables(this.db)
@@ -494,71 +509,63 @@ const createRepository = (child) => Object.assign(Object.create(baseRepository),
 const createObjectsRepository = (child = {}) => createRepository({
   table: 'objects',
   async getObjects() {
-    const { rows } = await this.db.query(`SELECT * FROM public.${this.table}`)
-    return rows
+    return await this.idb.getAll({ storeName: this.table })
+  },
+  async setObject(id, object) { 
+    await this.idb.set({ storeName: this.table, id, value: object }) 
   },
   async updateObjectData(objectId, data) {
     await this.db.query(`UPDATE public.${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
   },
   async getNextObjects(objectId) {
-    const iterateSql = `
-      WITH RECURSIVE next_objects AS (
-        SELECT o.* FROM objects o
-        WHERE o.id = $1
-        UNION ALL
-        SELECT o.* FROM objects o
-        INNER JOIN next_objects no ON o.id = no.next_id
-      )
-      SELECT * FROM next_objects
-      WHERE id != $1;
-    `;
-    return await this.db.query(iterateSql, [objectId])
+    let oId = objectId
+    if (oId === 'main') oId = 'main'.padEnd(26, ' ')
+
+    const object = await this.idb.get({ storeName: this.table, id: oId })
+    if (!object || !object.next_id) return []
+    
+    const objects = []
+
+    let currentId = object.next_id
+    while (currentId) {
+      const object = await this.idb.get({ storeName: this.table, id: currentId })
+      if (!object) { 
+        console.warn(`No record found with id=${currentId}`)
+        break
+      }
+      objects.push(object)
+      currentId = object.next_id
+    }
+    return objects
   },
+
   ...child
 })
 
 const systemObjectsRepository = createObjectsRepository()
-systemObjectsRepository.init(dbSystem)
+systemObjectsRepository.init(dbSystem, idbSys)
 const userObjectsRepository = createObjectsRepository()
-userObjectsRepository.init(dbUser)
+userObjectsRepository.init(dbUser, idbUser)
 
 const kvRepository = createRepository({
   table: 'kv',
-  async initTable() {
-    await this.db.query(`
-      CREATE TABLE IF NOT EXISTS ${this.table} (
-        key character varying(26) NOT NULL PRIMARY KEY,
-        value text
-      )
-    `)
-  },
   async getKey(key) {
-    const { rows } = await this.db.query(`SELECT * FROM ${this.table} WHERE key = $1`, [key])
-    if (rows.length > 0) {
-      const [ { value } ] = rows
-      return value
-    }
+    return await this.idb.get({ storeName: this.table, id: key })
   },
   async setKey(key, value) {
-    await this.db.query(`INSERT INTO ${this.table} (key, value) VALUES ($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value])
+    await this.idb.set({ storeName: this.table, id: key, value })
   },
   async delKey(key) {
-    await this.db.query(`DELETE FROM ${this.table} WHERE key = $1`, [key])
+    await this.idb.del({ storeName: this.table, id: key })
   }
 })
-kvRepository.init(dbUser)
+kvRepository.init(dbUser, idbUser)
 
 const objectManager = {
   openedObjectsIds: {},
   async init(dbSystem, dbUser) {
-    this.dbSystem = dbSystem
-    this.dbUser = dbUser
-
-    const value = await kvRepository.getKey('openedObjectsIds')
-    if (value) {
-      this.openedObjectsIds = JSON.parse(value)
-    }
+    const v = await kvRepository.getKey('openedObjectsIds')
+    if (v) this.openedObjectsIds = v
   },
   getOpenedObjects() {
     return this.openedObjectsIds
@@ -576,7 +583,7 @@ const objectManager = {
     this.saveOpenedObjects()
   },
   saveOpenedObjects() {
-    kvRepository.setKey('openedObjectsIds', JSON.stringify(this.openedObjectsIds))
+    kvRepository.setKey('openedObjectsIds', this.openedObjectsIds)
   },
 }
 const renderObjectName = (object, target) => {
@@ -617,7 +624,6 @@ const renderObjectName = (object, target) => {
       console.log(children)
 
       //what repo to use?
-      const objects = await systemObjectsRepository.getObjects()
       //console.log(objects)
 
       //find last child
@@ -664,30 +670,27 @@ const runObjectCode = async (x) => {
   }
 }
 
-if (!await kvRepository.isExists()) await kvRepository.initTable()
-await objectManager.init(dbSystem, dbUser)
+await objectManager.init()
 
-const idbSys = new IndexedDb()
-await idbSys.open('sys', ['objects'])
-const idbUser = new IndexedDb()
-await idbUser.open('user', ['objects', 'kv'])
+// for (const object of await systemObjectsRepository.getObjects()) {
+//     await idbSys.set({ storeName: 'objects', id: object.id, value: object })
+// }
 
-const mainObject = await systemObjectsRepository.getById('main')
-if (await systemObjectsRepository.isExists()) {
-  await renderObjectName(mainObject, objectBrowser.systemSection)
-  await runObjectCode({
-    object: mainObject, objectBrowser, 
-    objectManager, tabManager, renderObjectName,
-    systemObjectsRepository, userObjectsRepository
-  })
-} else {
-  //import system db from dump
-  console.log('need to import std data backup from backend')
-  //const mainObject = await processMainObject()
+const mainObject = await systemObjectsRepository.getById('main'.padEnd(26, ' '))
+if (!mainObject) {
+    //get dump from backend
 }
+
+await renderObjectName(mainObject, objectBrowser.systemSection)
+await runObjectCode({
+  object: mainObject, objectBrowser, 
+  objectManager, tabManager, renderObjectName,
+  systemObjectsRepository, userObjectsRepository
+})
 
 //actually objects opened by tabManager
 const openedObjects = await objectManager.getOpenedObjects()
+
 const isMainFound = Object.keys(openedObjects).find(id => id.trim() === 'main')
 if (isMainFound) tabManager.openTab(mainObject)
 
