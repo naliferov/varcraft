@@ -1,25 +1,5 @@
 document.body.style.margin = 0
 
-const { 
-  promise: serviceWorkerPromise, 
-  resolve: serviceWorkerResolve,
-  reject: serviceWorkerIReject 
-} = Promise.withResolvers()
-
-onload = () => {
-  navigator.serviceWorker
-      .register('service-worker.js', { scope: '/' })
-      .then(reg => {
-        console.log('sw registered')
-        serviceWorkerResolve(reg)
-      })
-      .catch(err => {
-        console.error('sw reg failed', err)
-        serviceWorkerReject()
-      })
-}
-await serviceWorkerPromise
-
 const mk = (id, target, tag = 'div') => {
   const el = document.createElement(tag)
   if (id) {
@@ -84,10 +64,16 @@ style.textContent = `
     align-items: center;
     gap: 8px;
   }
-  .ctx-menu-btn {
+  .op-list-btn {
     width: 24px;
     height: 24px;
     cursor: pointer;
+  }
+  .object {
+    cursor: pointer;
+  }
+  .object:hover:not(:has(.object:hover)) {
+    background:rgb(229, 229, 229);
   }
 `
 
@@ -95,41 +81,55 @@ const objectBrowserHeader = mk(0, objectBrowser)
 objectBrowserHeader.className = 'object-browser-header'
 mk(0, objectBrowser, 'br')
 
-let ctxMenu
-const ctxMenuBtn = mk('.ctx-menu-btn', objectBrowserHeader)
-ctxMenuBtn.innerHTML = `
+const opListBtn = mk('.op-list-btn', objectBrowserHeader)
+opListBtn.innerHTML = `
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6">
   <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
   </svg>
 `
-const ctxMenuBtnRect = ctxMenuBtn.getBoundingClientRect()
-ctxMenuBtn.addEventListener('click', (e) => {
-  if (ctxMenu) {
-    ctxMenu.remove()
-    ctxMenu = null
-    return
+
+const opListManager = {
+  opList: null,
+  createOpList() {
+    if (this.opList) {
+      this.removeOpList()
+      return
+    }
+    this.opList = mk('.op-list', app)
+    const style = mk(null, this.opList, 'style')
+    style.innerHTML = `
+      .op-list {
+        min-width: 10em;
+        position: absolute;
+        background: #f3f3f3;
+        color: #616161;
+        font-family: Roboto, sans-serif;
+        box-shadow: rgba(2, 0, 0, 0.35) 0px 5px 15px;
+        cursor: pointer;
+        z-index: 1000;
+      }
+      .op-list-item {
+        padding: 5px;
+      }
+        .op-list-item:hover {
+        background:rgb(221, 221, 221);
+      }          
+    `
+    return this.opList
+  },
+  removeOpList() {
+    this.opList.remove()
+    this.opList = null
   }
-  ctxMenu = mk('.ctx-menu', app)
-  const style = mk(null, ctxMenu, 'style')
-  style.innerHTML = `
-    .ctx-menu {
-      position: absolute;
-      background: #f3f3f3;
-      color: #616161;
-      font-family: Roboto, sans-serif;
-      box-shadow: rgba(2, 0, 0, 0.35) 0px 5px 15px;
-    }
-    .ctx-menu-item {
-      padding: 5px;
-    }
-    .ctx-menu-item:hover {
-      background:rgb(221, 221, 221);
-    }
-  `
-  ctxMenu.style.left = `${ctxMenuBtnRect.left}px`
-  ctxMenu.style.top = `${ctxMenuBtnRect.top + ctxMenuBtnRect.height}px`
-  ctxMenu.style.cursor = 'pointer'
-  ctxMenu.style.zIndex = '1000'
+}
+
+const opListBtnRect = opListBtn.getBoundingClientRect()
+opListBtn.addEventListener('click', (e) => {
+  const opList = opListManager.createOpList()
+  if (!opList) return
+
+  opList.style.left = `${opListBtnRect.left}px`
+  opList.style.top = `${opListBtnRect.top + opListBtnRect.height}px`
 
   const importDump = async (db, file) => {
     const r = new FileReader()
@@ -165,8 +165,8 @@ ctxMenuBtn.addEventListener('click', (e) => {
     inProgress = false
   }
 
-  const itemSystemImport = mk(null, ctxMenu)
-  itemSystemImport.className = 'ctx-menu-item'
+  const itemSystemImport = mk(null, opList)
+  itemSystemImport.className = 'op-list-item'
   itemSystemImport.textContent = 'Import system objects'
 
   let fInput = mk(null, itemSystemImport, 'input')
@@ -180,15 +180,15 @@ ctxMenuBtn.addEventListener('click', (e) => {
 
   let inProgress = false
 
-  const itemSystemExport = mk(null, ctxMenu)
-  itemSystemExport.className = 'ctx-menu-item'
+  const itemSystemExport = mk(null, opList)
+  itemSystemExport.className = 'op-list-item'
   itemSystemExport.textContent = 'Export system objects'
   itemSystemExport.addEventListener('click', async () => {
     exportDump(dbSystem)
   })
 
-  const itemUserImport = mk(null, ctxMenu)
-  itemUserImport.className = 'ctx-menu-item'
+  const itemUserImport = mk(null, opList)
+  itemUserImport.className = 'op-list-item'
   itemUserImport.textContent = 'Import user objects'
 
   fInput = mk(null, itemUserImport, 'input')
@@ -201,8 +201,8 @@ ctxMenuBtn.addEventListener('click', (e) => {
     await importDump(dbUser, file)
   })
 
-  const itemUserExport = mk(null, ctxMenu)
-  itemUserExport.className = 'ctx-menu-item'
+  const itemUserExport = mk(null, opList)
+  itemUserExport.className = 'op-list-item'
   itemUserExport.textContent = 'Export user objects'
   itemUserExport.addEventListener('click', (e) => {
     e.preventDefault()
@@ -242,7 +242,7 @@ const createTabManager = (target, mk, width) => {
       align-items: center;
       padding: 8px;
       cursor: pointer;
-      background: #ececec;
+      background: #e4e4e4;
     }
     .tab.active {
       background: #FFFFFF;
@@ -399,7 +399,6 @@ const tabManager = createTabManager(app, mk, tabManagerWidth)
 //const objectsView = mk('objects-view', app)
 
 
-
 const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
 const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
 const dbSystem = await createDb('db-system')
@@ -526,7 +525,6 @@ const objectManager = {
 const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
   dom.className = 'object'
-  dom.style.cursor = 'pointer'
 
   dom.name = mk(null, dom)
   dom.name.innerText = object.data.name
@@ -536,6 +534,61 @@ const renderObjectName = (object, target) => {
     tabManager.saveActiveTab(object.id)
     objectManager.openObject(object)
   })
+
+  dom.name.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const opListTarget = e.target.parentElement
+
+    // console.log(target, objectBrowser.systemSection)
+    // if (target === objectBrowser.systemSection) {
+    //   console.log('system repo')
+    // }
+
+    const opList = opListManager.createOpList()
+    if (!opList) return
+    opList.style.left = `${e.clientX}px`
+    opList.style.top = `${e.clientY}px`
+
+    const createItem = (text) => {
+      let i = mk(null, opList)
+      i.className = 'op-list-item'
+      i.textContent = text
+      return i
+    }
+
+    let i = createItem('add')
+    i.addEventListener('click', async (e) => {
+      //opListManager.removeOpList()
+
+      const children = dom.getElementsByClassName('children')[0]
+      if (!children) return
+      console.log(children)
+
+      const objects = await systemObjectsRepository.getObjects()
+      //console.log(objects)
+
+      //find last child
+      //const lastChild = targetObject.data.children[targetObject.data.children.length - 1]
+      //console.log(lastChild)
+
+
+
+      //create object
+      //tabManager.openTab(object)
+    })
+
+    i = createItem('remove')
+    i.addEventListener('click', () => {
+      opListManager.removeOpList()
+      //tabManager.openTab(object)
+    })
+    i = createItem('rename')
+    i.addEventListener('click', () => {
+      //tabManager.openTab(object)
+    })
+  })
+
 
   const children = mk(null, dom)
   children.className = 'children'
@@ -562,7 +615,6 @@ const runObjectCode = async (x) => {
   }
 }
 
-
 if (!await kvRepository.isExists()) await kvRepository.initTable()
 await objectManager.init(dbSystem, dbUser)
 
@@ -570,7 +622,7 @@ let mainObject
 if (await systemObjectsRepository.isExists()) {
   mainObject = await systemObjectsRepository.getById('main')
   await renderObjectName(mainObject, objectBrowser.systemSection)
-  await runObjectCode({ 
+  await runObjectCode({
     object: mainObject, objectBrowser, 
     objectManager, tabManager, renderObjectName,
     systemObjectsRepository, userObjectsRepository
