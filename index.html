@@ -23,7 +23,6 @@ const mk = (id, target, tag = 'div') => {
   target.append(el)
   return el
 }
-
 const removeExtraEscaping = str => str.replace(/\\+n/g, '\n')
 
 const app = mk('app', document.body)
@@ -88,8 +87,7 @@ style.textContent = `
   }
 `
 
-const objectBrowserHeader = mk(0, objectBrowser)
-objectBrowserHeader.className = 'object-browser-header'
+const objectBrowserHeader = mk('.object-browser-header', objectBrowser)
 mk(0, objectBrowser, 'br')
 
 const opListBtn = mk('.op-list-btn', objectBrowserHeader)
@@ -176,8 +174,7 @@ opListBtn.addEventListener('click', (e) => {
     inProgress = false
   }
 
-  const itemSystemImport = mk(null, opList)
-  itemSystemImport.className = 'op-list-item'
+  const itemSystemImport = mk('.op-list-item', opList)
   itemSystemImport.textContent = 'Import system objects'
 
   let fInput = mk(null, itemSystemImport, 'input')
@@ -191,15 +188,13 @@ opListBtn.addEventListener('click', (e) => {
 
   let inProgress = false
 
-  const itemSystemExport = mk(null, opList)
-  itemSystemExport.className = 'op-list-item'
+  const itemSystemExport = mk('.op-list-item', opList)
   itemSystemExport.textContent = 'Export system objects'
   itemSystemExport.addEventListener('click', async () => {
     exportDump(dbSystem)
   })
 
-  const itemUserImport = mk(null, opList)
-  itemUserImport.className = 'op-list-item'
+  const itemUserImport = mk('.op-list-item', opList)
   itemUserImport.textContent = 'Import user objects'
 
   fInput = mk(null, itemUserImport, 'input')
@@ -212,8 +207,7 @@ opListBtn.addEventListener('click', (e) => {
     await importDump(dbUser, file)
   })
 
-  const itemUserExport = mk(null, opList)
-  itemUserExport.className = 'op-list-item'
+  const itemUserExport = mk('.op-list-item', opList)
   itemUserExport.textContent = 'Export user objects'
   itemUserExport.addEventListener('click', (e) => {
     e.preventDefault()
@@ -291,7 +285,7 @@ const createTabManager = (target, mk, width) => {
 
     tab.name = mk(null, tab)
     tab.name.className = 'tab-name'
-    tab.name.innerText = object.data.name
+    tab.name.textContent = object.data.name
     
     tab.closeBtn = mk('close-tab-btn', tab)
     tab.closeBtn.addEventListener('click', (e) => {
@@ -321,6 +315,8 @@ const createTabManager = (target, mk, width) => {
       if (tabForActivation) {
         activateTab(tabForActivation)
         saveActiveTab(tabForActivation.tab.getAttribute('object-id'))
+      } else {
+        clearActiveTab()
       }
     })
     tab.closeBtn.innerHTML += `
@@ -328,12 +324,10 @@ const createTabManager = (target, mk, width) => {
         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"></path>
       </svg>
     `
-    tab.view = mk(null, tabsView)
-    tab.view.className = 'tab-view'
+    tab.view = mk('.tab-view', tabsView)
 
-    const pre = mk(null, tab.view, 'div')
+    const pre = mk('object-code', tab.view, 'div')
     pre.style.height = window.innerHeight - tabsBarHeight + 'px' 
-    pre.className = 'object-code'
 
     const code = removeExtraEscaping(object.data.code)
     const editor = monaco.editor.create(pre, {
@@ -388,6 +382,7 @@ const createTabManager = (target, mk, width) => {
   }
 
   const saveActiveTab = (id) => kvRepository.setKey('activeTabId', id)
+  const clearActiveTab = () => kvRepository.delKey('activeTabId')
 
   const restoreLastActiveTab = async () => {
     const value = await kvRepository.getKey('activeTabId')
@@ -395,7 +390,6 @@ const createTabManager = (target, mk, width) => {
 
     const tab = tabsBar.querySelector(`[object-id="${value}"]`)
     const tabView = tab.view
-
     if (tab && tabView) {
       activateTab({ tab, tabView })
     }
@@ -406,9 +400,59 @@ const createTabManager = (target, mk, width) => {
 
 const tabManagerWidth = `calc(100% - ${objectBrowserWidth + objectBrowserPadding * 2}px)`
 const tabManager = createTabManager(app, mk, tabManagerWidth)
-
 //const objectsView = mk('objects-view', app)
 
+class IndexedDb {  
+  async open(dbName = 'default', storages = ['default']) {
+    return new Promise((resolve, reject) => {
+      const openRequest = indexedDB.open(dbName)
+      
+      openRequest.onerror = () => {
+        reject(openRequest.error)
+      }
+      openRequest.onsuccess = () => {
+        this.db = openRequest.result
+        resolve(this.db)
+      }
+      openRequest.onupgradeneeded = () => {
+        const db = openRequest.result
+        
+        for (const storageName of storages) {
+          if (!db.objectStoreNames.contains(storageName)) {
+            db.createObjectStore(storageName)
+          }
+        }
+      }
+    })
+  }
+  async set(x) {
+    const { storeName = 'default', id, value } = x
+
+    return new Promise((resolve, reject) => {
+      const rq = this.db.transaction(storeName, 'readwrite').objectStore(storeName).put(value, id)
+      rq.onsuccess = () => resolve(rq.result)
+      rq.onerror = () => reject(rq.error)
+    })
+  }
+  async get(x) {
+    const { storeName = 'default', id } = x
+
+    return new Promise((resolve, reject) => {
+      const rq = this.db.transaction(storeName, 'readonly').objectStore(storeName).get(id)
+      rq.onsuccess = () => resolve(rq.result)
+      rq.onerror = () => reject(rq.error)
+    })
+  }
+  async del(x) {
+    const { storeName = 'default', id } = x
+
+    return new Promise((resolve, reject) => {
+      const rq = this.db.transaction(storeName, 'readwrite').objectStore(storeName).delete(id)
+      rq.onsuccess = () => resolve(rq.result)
+      rq.onerror = () => reject(rq.error)
+    })
+  }
+}
 
 const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
 const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
@@ -498,6 +542,9 @@ const kvRepository = createRepository({
   async setKey(key, value) {
     await this.db.query(`INSERT INTO ${this.table} (key, value) VALUES ($1, $2)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value])
+  },
+  async delKey(key) {
+    await this.db.query(`DELETE FROM ${this.table} WHERE key = $1`, [key])
   }
 })
 kvRepository.init(dbUser)
@@ -532,7 +579,6 @@ const objectManager = {
     kvRepository.setKey('openedObjectsIds', JSON.stringify(this.openedObjectsIds))
   },
 }
-
 const renderObjectName = (object, target) => {
   const dom = mk(object.id, target)
   dom.className = 'object'
@@ -545,7 +591,6 @@ const renderObjectName = (object, target) => {
     tabManager.saveActiveTab(object.id)
     objectManager.openObject(object)
   })
-
   dom.name.addEventListener('contextmenu', (e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -579,8 +624,6 @@ const renderObjectName = (object, target) => {
       //const lastChild = targetObject.data.children[targetObject.data.children.length - 1]
       //console.log(lastChild)
 
-
-
       //create object
       //tabManager.openTab(object)
     })
@@ -603,7 +646,6 @@ const renderObjectName = (object, target) => {
 
   return { children }
 }
-
 const runObjectCode = async (x) => {
   const { object, objectBrowser, objectManager, tabManager, 
     renderObjectName, systemObjectsRepository, userObjectsRepository } = x
@@ -625,9 +667,13 @@ const runObjectCode = async (x) => {
 if (!await kvRepository.isExists()) await kvRepository.initTable()
 await objectManager.init(dbSystem, dbUser)
 
-let mainObject
+const idbSys = new IndexedDb()
+await idbSys.open('sys', ['objects'])
+const idbUser = new IndexedDb()
+await idbUser.open('user', ['objects', 'kv'])
+
+const mainObject = await systemObjectsRepository.getById('main')
 if (await systemObjectsRepository.isExists()) {
-  mainObject = await systemObjectsRepository.getById('main')
   await renderObjectName(mainObject, objectBrowser.systemSection)
   await runObjectCode({
     object: mainObject, objectBrowser, 
