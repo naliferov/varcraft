@@ -10,6 +10,14 @@
         <script type="module">
 
 document.body.style.margin = 0
+// window.addEventListener('beforeunload', (e) => {
+//     e.preventDefault()
+//     e.returnValue = ''
+//     //run saving html
+//     //console.log('beforeunload')
+// })
+
+const symbolRepository = Symbol('repository')
 
 const mk = (id, target, tag = 'div') => {
   const el = document.createElement(tag)
@@ -23,7 +31,88 @@ const mk = (id, target, tag = 'div') => {
   target.append(el)
   return el
 }
-const removeExtraEscaping = str => str.replace(/\\+n/g, '\n')
+
+const ulid = (() => {
+  const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  const ENCODING_LEN = ENCODING.length;
+  const TIME_LEN = 10;
+  const RANDOM_LEN = 16;
+  const TIME_MAX = Math.pow(2, 48) - 1;
+
+  let lastTime = 0;
+  let lastRandom = '';
+
+  function getPRNG(allowInsecure) {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      return () => {
+        const buf = new Uint8Array(1);
+        crypto.getRandomValues(buf);
+        return buf[0] / 0xff;
+      };
+    }
+    if (allowInsecure) {
+      return () => Math.random();
+    }
+    throw new Error('secure crypto unavailable');
+  }
+
+  function randChar(rng) {
+    let r = Math.floor(rng() * ENCODING_LEN);
+    if (r === ENCODING_LEN) r = ENCODING_LEN - 1;
+    return ENCODING[r];
+  }
+
+  function encodeTime(ms) {
+    if (!Number.isInteger(ms) || ms < 0 || ms > TIME_MAX) {
+      throw new Error('invalid time');
+    }
+    let str = '';
+    for (let i = 0; i < TIME_LEN; i++) {
+      str = ENCODING[ms % ENCODING_LEN] + str;
+      ms = Math.floor(ms / ENCODING_LEN);
+    }
+    return str;
+  }
+
+  function encodeRandom(rng) {
+    let str = '';
+    for (let i = 0; i < RANDOM_LEN; i++) {
+      str = randChar(rng) + str;
+    }
+    return str;
+  }
+
+  function increment(str) {
+    const arr = str.split('');
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const idx = ENCODING.indexOf(arr[i]);
+      if (idx < 0) throw new Error('invalid random component');
+      if (idx < ENCODING_LEN - 1) {
+        arr[i] = ENCODING[idx + 1];
+        return arr.join('');
+      }
+      arr[i] = ENCODING[0];
+    }
+    throw new Error('cannot increment');
+  }
+
+  return function({ monotonic = false, allowInsecure = false, prng, time } = {}) {
+    const ms = Number.isInteger(time) ? time : Date.now();
+    const rng = prng || getPRNG(allowInsecure);
+
+    if (monotonic) {
+      if (ms <= lastTime) {
+        lastRandom = increment(lastRandom);
+      } else {
+        lastTime = ms;
+        lastRandom = encodeRandom(rng);
+      }
+      return encodeTime(lastTime) + lastRandom;
+    }
+
+    return encodeTime(ms) + encodeRandom(rng);
+  };
+})();
 
 const app = mk('app', document.body)
 app.style.display = 'flex'
@@ -143,18 +232,13 @@ opListBtn.addEventListener('click', (e) => {
   const importDump = async (db, file) => {
     const r = new FileReader()
     r.readAsText(file)
-    r.onload = async() => {      
-      await db.exec(r.result)
-
-      const objects = await systemObjectsRepository.getObjects()
-      for (let i = 0; i < objects.length; i++) {
-        const o = objects[i]
-        if (!o.data.code) continue
-        o.data.code = removeExtraEscaping(o.data.code)
-        await systemObjectsRepository.setObject(o.id, o)
+    r.onload = async () => {      
+      const objects = JSON.parse(r.result)
+      for (const object of objects) {
+        console.log(object)
+        //await systemObjectsRepository.setObject(object.id, object)
       }
       console.log('import complete')
-      document.location.reload()
     }
   }
 
@@ -329,9 +413,8 @@ const createTabManager = (target, mk, width) => {
     const pre = mk('object-code', tab.view, 'div')
     pre.style.height = window.innerHeight - tabsBarHeight + 'px' 
 
-    const code = removeExtraEscaping(object.data.code)
     const editor = monaco.editor.create(pre, {
-      value: code, 
+      value: object.data.code, 
       language: 'javascript',
       theme: 'vs-dark', 
       automaticLayout: true, 
@@ -463,8 +546,6 @@ class IndexedDb {
   }
 }
 
-//const { PGlite } = await import('https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js')
-//const createDb = async (dbName) => await PGlite.create(`idb://${dbName}`)
 const dbSystem = null
 const dbUser = null
 
@@ -473,34 +554,14 @@ await idbSys.open('sys', ['objects'])
 const idbUser = new IndexedDb()
 await idbUser.open('user', ['objects', 'kv'])
 
-const dbGetTables = async (db) => {
-  const { rows } = await db.query(`
-    SELECT table_name FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-  `)
-  return rows.map(row => row.table_name)
-}
-const dbDropTables = async (db) => {
-  const tables = await dbGetTables(db)
-  for (const table of tables) {
-    await db.query(`DROP TABLE IF EXISTS ${table}`)
-  }
-}
-
 const baseRepository = {
   db: null,
-  idb: null,
   table: null,
-  init(db, idb) { 
+  init(db) { 
     this.db = db
-    this.idb = idb
   },
   async getById(id) {
-    return await this.idb.get({ storeName: this.table, id })
-  },
-  async isExists() {
-    const tables = await dbGetTables(this.db)
-    return tables.includes(this.table)
+    return await this.db.get({ storeName: this.table, id })
   },
 }
 
@@ -508,11 +569,11 @@ const createRepository = (child) => Object.assign(Object.create(baseRepository),
 
 const createObjectsRepository = (child = {}) => createRepository({
   table: 'objects',
-  async getObjects() {
-    return await this.idb.getAll({ storeName: this.table })
+  async getAll() {
+    return await this.db.getAll({ storeName: this.table })
   },
   async setObject(id, object) { 
-    await this.idb.set({ storeName: this.table, id, value: object }) 
+    await this.db.set({ storeName: this.table, id, value: object }) 
   },
   async updateObjectData(objectId, data) {
     await this.db.query(`UPDATE public.${this.table} SET data = $1 WHERE id = $2`, [data, objectId])
@@ -521,14 +582,14 @@ const createObjectsRepository = (child = {}) => createRepository({
     let oId = objectId
     if (oId === 'main') oId = 'main'.padEnd(26, ' ')
 
-    const object = await this.idb.get({ storeName: this.table, id: oId })
+    const object = await this.db.get({ storeName: this.table, id: oId })
     if (!object || !object.next_id) return []
     
     const objects = []
 
     let currentId = object.next_id
     while (currentId) {
-      const object = await this.idb.get({ storeName: this.table, id: currentId })
+      const object = await this.db.get({ storeName: this.table, id: currentId })
       if (!object) { 
         console.warn(`No record found with id=${currentId}`)
         break
@@ -543,27 +604,27 @@ const createObjectsRepository = (child = {}) => createRepository({
 })
 
 const systemObjectsRepository = createObjectsRepository()
-systemObjectsRepository.init(dbSystem, idbSys)
+systemObjectsRepository.init(idbSys)
 const userObjectsRepository = createObjectsRepository()
-userObjectsRepository.init(dbUser, idbUser)
+userObjectsRepository.init(idbUser)
 
 const kvRepository = createRepository({
   table: 'kv',
   async getKey(key) {
-    return await this.idb.get({ storeName: this.table, id: key })
+    return await this.db.get({ storeName: this.table, id: key })
   },
   async setKey(key, value) {
-    await this.idb.set({ storeName: this.table, id: key, value })
+    await this.db.set({ storeName: this.table, id: key, value })
   },
   async delKey(key) {
-    await this.idb.del({ storeName: this.table, id: key })
+    await this.db.del({ storeName: this.table, id: key })
   }
 })
-kvRepository.init(dbUser, idbUser)
+kvRepository.init(idbUser)
 
 const objectManager = {
   openedObjectsIds: {},
-  async init(dbSystem, dbUser) {
+  async init() {
     const v = await kvRepository.getKey('openedObjectsIds')
     if (v) this.openedObjectsIds = v
   },
@@ -586,9 +647,9 @@ const objectManager = {
     kvRepository.setKey('openedObjectsIds', this.openedObjectsIds)
   },
 }
-const renderObjectName = (object, target) => {
+const renderObjectName = (object, target, repo = 'sys') => {
   const dom = mk(object.id, target)
-  dom.className = 'object'
+  dom.className = `object repo-${repo}`
 
   dom.name = mk(null, dom)
   dom.name.innerText = object.data.name
@@ -608,55 +669,100 @@ const renderObjectName = (object, target) => {
     opList.style.left = `${e.clientX}px`
     opList.style.top = `${e.clientY}px`
 
-    const createItem = (text) => {
+    const mkOp = (text) => {
       let i = mk(null, opList)
       i.className = 'op-list-item'
       i.textContent = text
       return i
     }
 
-    let i = createItem('add')
+    let i = mkOp('New Object')
     i.addEventListener('click', async (e) => {
-      //opListManager.removeOpList()
+      opListManager.removeOpList()
 
       const children = dom.getElementsByClassName('children')[0]
-      if (!children) return
-      console.log(children)
+      if (!children || !children.children.length) return
 
-      //what repo to use?
-      //console.log(objects)
+      const last = children.children[children.children.length - 1]
+      const lastObject = repo === 'sys'
+        ? await systemObjectsRepository.getById(last.id)
+        : await userObjectsRepository.getById(last.id)
+      
+      const newObject = {
+        id: ulid(),
+        data: { name: 'New Object', code: 'const { object } = $' },
+        prev_id: last.id, next_id: null,
+      }
+      lastObject.next_id = newObject.id
 
-      //find last child
-      //const lastChild = targetObject.data.children[targetObject.data.children.length - 1]
-      //console.log(lastChild)
-
-      //create object
-      //tabManager.openTab(object)
+      await Promise.all([
+        systemObjectsRepository.setObject(lastObject.id, lastObject),
+        systemObjectsRepository.setObject(newObject.id, newObject),
+      ])
+      renderObjectName(newObject, children)
     })
 
-    i = createItem('remove')
+    i = mkOp('New Category')
+    i.addEventListener('click', async (e) => {
+        //console.log(object)
+    })
+
+    i = mkOp('Info')
+    i.addEventListener('click', () => {
+      console.log(object)
+    })
+
+    i = mkOp('Rename')
     i.addEventListener('click', () => {
       opListManager.removeOpList()
-      //tabManager.openTab(object)
+      dom.name.contentEditable = true
+      dom.name.focus()
+
+      const originalName = dom.name.textContent
+      const handleRename = async () => {
+        dom.name.contentEditable = false
+        const newName = dom.name.textContent.trim()
+        if (!newName || newName === originalName) {
+            dom.name.textContent = originalName
+            return
+        }
+        object.data.name = newName
+        const repoObject = repo === 'sys' ? await systemObjectsRepository : await userObjectsRepository
+        await repoObject.setObject(object.id, object)
+      }
+
+      const onKeyDown = async (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          await handleRename()
+          dom.name.removeEventListener('keydown', onKeyDown)
+        }
+        if (e.key === 'Escape') {
+          dom.name.contentEditable = false
+          dom.name.textContent = originalName
+          dom.name.removeEventListener('keydown', onKeyDown)
+        }
+      }
+
+      dom.name.addEventListener('keydown', onKeyDown)
     })
-    i = createItem('rename')
+    i = mkOp('Delete')
     i.addEventListener('click', () => {
       //tabManager.openTab(object)
     })
   })
 
-
   const children = mk(null, dom)
   children.className = 'children'
   children.style.marginLeft = '1em'
 
-  return { children }
+  return { objectDom: dom, children }
 }
 const runObjectCode = async (x) => {
   const { object, objectBrowser, objectManager, tabManager, 
     renderObjectName, systemObjectsRepository, userObjectsRepository } = x
   const code = `export default async ($) => { 
-    ${removeExtraEscaping(object.data.code)}
+    ${object.data.code}
   }`
   const blob = new Blob([code], { type: 'application/javascript' })
   try {
@@ -672,7 +778,7 @@ const runObjectCode = async (x) => {
 
 await objectManager.init()
 
-// for (const object of await systemObjectsRepository.getObjects()) {
+// for (const object of await systemObjectsRepository.getAll()) {
 //     await idbSys.set({ storeName: 'objects', id: object.id, value: object })
 // }
 
@@ -681,7 +787,7 @@ if (!mainObject) {
     //get dump from backend
 }
 
-await renderObjectName(mainObject, objectBrowser.systemSection)
+await renderObjectName(mainObject, objectBrowser.systemSection, 'sys')
 await runObjectCode({
   object: mainObject, objectBrowser, 
   objectManager, tabManager, renderObjectName,
